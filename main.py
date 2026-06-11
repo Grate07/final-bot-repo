@@ -13,10 +13,10 @@ Thread(target=run).start()
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Config - replace with your IDs
-TICKET_CATEGORY = 0  # Right click category -> Copy ID
-LOG_CHANNEL = 0      # Right click channel -> Copy ID  
-WELCOME_CHANNEL = 0  # Right click channel -> Copy ID
+# Config - your IDs
+TICKET_CATEGORY = 1513372898058833981  # Tickets category
+LOG_CHANNEL = 1513387589514694747      # Transcripts go here
+WELCOME_CHANNEL = 1484006886310412329  # Welcome messages go here
 
 class TicketView(discord.ui.View):
     def __init__(self):
@@ -26,6 +26,8 @@ class TicketView(discord.ui.View):
     async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild = interaction.guild
         category = discord.utils.get(guild.categories, id=TICKET_CATEGORY)
+        if category is None:
+            return await interaction.response.send_message("Ticket category not found. Tell an admin.", ephemeral=True)
         channel = await guild.create_text_channel(f"ticket-{interaction.user.name}", category=category)
         await channel.set_permissions(interaction.user, read_messages=True, send_messages=True)
         await channel.set_permissions(guild.default_role, read_messages=False)
@@ -41,8 +43,8 @@ class CloseView(discord.ui.View):
     @discord.ui.button(label="Close", emoji="🔒", style=discord.ButtonStyle.red, custom_id="close_ticket")
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         log_channel = bot.get_channel(LOG_CHANNEL)
-        transcript = await chat_exporter.export(interaction.channel)
-        if transcript:
+        transcript = await chat_exporter.export(interaction.channel, tz_info="Asia/Kolkata")
+        if transcript and log_channel:
             transcript_file = discord.File(io.BytesIO(transcript.encode()), filename=f"{interaction.channel.name}.html")
             await log_channel.send(f"Ticket {interaction.channel.name} closed by {interaction.user.mention}", file=transcript_file)
         await interaction.response.send_message("Closing ticket in 5 seconds...")
@@ -54,14 +56,19 @@ async def on_ready():
     print(f'Logged in as {bot.user}')
     bot.add_view(TicketView())
     bot.add_view(CloseView())
-    await bot.tree.sync()
+    try:
+        await bot.tree.sync()
+        print("Slash commands synced")
+    except Exception as e:
+        print(e)
 
 @bot.event
 async def on_member_join(member):
     channel = bot.get_channel(WELCOME_CHANNEL)
     if channel:
         embed = discord.Embed(title="Welcome!", description=f"{member.mention} just joined {member.guild.name}!", color=0x00ff00)
-        embed.set_thumbnail(url=member.avatar.url)
+        if member.avatar:
+            embed.set_thumbnail(url=member.avatar.url)
         await channel.send(embed=embed)
 
 @bot.tree.command(name="ticket-panel")
