@@ -161,12 +161,17 @@ async def send_welcome(member, channel):
 async def on_ready():
     bot.add_view(TicketPanel())
     bot.add_view(CloseTicket())
-    try:
-        synced = await bot.tree.sync()
-        print(f"Logged in as {bot.user}")
-        print(f"Slash commands synced: {len(synced)}")
-    except Exception as e:
-        print(e)
+
+    # Sync commands to all servers instantly
+    for guild in bot.guilds:
+        try:
+            bot.tree.copy_global_to(guild=guild)
+            synced = await bot.tree.sync(guild=guild)
+            print(f"Synced {len(synced)} commands to {guild.name}")
+        except Exception as e:
+            print(f"Failed to sync to {guild.name}: {e}")
+
+    print(f"Logged in as {bot.user}")
 
 @bot.event
 async def on_member_join(member):
