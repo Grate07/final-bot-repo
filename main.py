@@ -6,6 +6,7 @@ import io
 import os
 from flask import Flask
 from threading import Thread
+from datetime import datetime
 
 # --- KEEP RENDER ALIVE ---
 app = Flask('')
@@ -31,7 +32,9 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # --- CONFIG ---
 TICKET_CATEGORY_NAME = "Tickets"
 STAFF_ROLE_NAME = "Staff"
-LOG_CHANNEL_ID = 1513387589514694747  # Your log channel
+LOG_CHANNEL_ID = 1513387589514694747
+WELCOME_CHANNEL_ID = 1484006886310412329  # Your welcome channel
+AUTO_ROLE_ID = 1485336874355658862        # Role to give on join
 
 # --- TICKET PANEL VIEW ---
 class TicketPanel(discord.ui.View):
@@ -43,18 +46,15 @@ class TicketPanel(discord.ui.View):
         guild = interaction.guild
         user = interaction.user
         
-        # Check if ticket exists
         existing_ticket = discord.utils.get(guild.text_channels, name=f"ticket-{user.name.lower()}")
         if existing_ticket:
             await interaction.response.send_message(f"You already have a ticket: {existing_ticket.mention}", ephemeral=True)
             return
 
-        # Get or create category
         category = discord.utils.get(guild.categories, name=TICKET_CATEGORY_NAME)
         if not category:
             category = await guild.create_category(TICKET_CATEGORY_NAME)
 
-        # Get staff role
         staff_role = discord.utils.get(guild.roles, name=STAFF_ROLE_NAME)
         
         overwrites = {
@@ -65,7 +65,6 @@ class TicketPanel(discord.ui.View):
         if staff_role:
             overwrites[staff_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
 
-        # Create ticket channel
         channel = await guild.create_text_channel(
             name=f"ticket-{user.name}",
             category=category,
@@ -73,12 +72,19 @@ class TicketPanel(discord.ui.View):
         )
 
         embed = discord.Embed(
-            title="Ticket Created",
-            description=f"Welcome {user.mention}! Support will be with you shortly.\nClick 🔒 to close this ticket.",
-            color=discord.Color.green()
+            title="🎫 Support Ticket",
+            description=f"Hey {user.mention}, thanks for creating a ticket!",
+            color=discord.Color.blue()
         )
+        embed.add_field(name="How to proceed", value="Please describe your issue in detail. A staff member will assist you shortly.", inline=False)
+        embed.add_field(name="Close ticket", value="Click the 🔒 button below when your issue is resolved.", inline=False)
+        embed.set_footer(text=f"User ID: {user.id}")
         
-        await channel.send(embed=embed, view=CloseTicket())
+        ping_content = f"{user.mention}"
+        if staff_role:
+            ping_content += f" {staff_role.mention}"
+        
+        await channel.send(content=ping_content, embed=embed, view=CloseTicket())
         await interaction.response.send_message(f"Ticket created: {channel.mention}", ephemeral=True)
 
 # --- CLOSE TICKET VIEW ---
@@ -90,7 +96,6 @@ class CloseTicket(discord.ui.View):
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("Closing ticket and generating transcript...", ephemeral=True)
         
-        # Generate transcript
         transcript = await chat_exporter.export(interaction.channel)
         if transcript is None:
             return
@@ -100,7 +105,6 @@ class CloseTicket(discord.ui.View):
             filename=f"transcript-{interaction.channel.name}.html"
         )
 
-        # Send to log channel
         log_channel = bot.get_channel(LOG_CHANNEL_ID)
         if log_channel:
             embed = discord.Embed(
@@ -110,7 +114,6 @@ class CloseTicket(discord.ui.View):
             )
             await log_channel.send(embed=embed, file=transcript_file)
         
-        # Delete channel
         await interaction.channel.delete()
 
 # --- BOT EVENTS ---
@@ -124,6 +127,32 @@ async def on_ready():
         print(f"Slash commands synced: {len(synced)}")
     except Exception as e:
         print(e)
+
+@bot.event
+async def on_member_join(member):
+    # 1. Give auto role
+    role = member.guild.get_role(AUTO_ROLE_ID)
+    if role:
+        try:
+            await member.add_roles(role, reason="Auto role on join")
+        except discord.Forbidden:
+            print("Bot doesn't have permission to give that role. Move bot role higher.")
+
+    # 2. Send welcome message
+    channel = bot.get_channel(WELCOME_CHANNEL_ID)
+    if channel is None:
+        return
+    
+    embed = discord.Embed(
+        title=f"Welcome to {member.guild.name}! 🎉",
+        description=f"Hey {member.mention}, you’re member #{member.guild.member_count}",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="Next steps", value="• Check rules\n• Get roles\n• Introduce yourself", inline=False)
+    embed.set_thumbnail(url=member.display_avatar.url)  # User's avatar
+    embed.set_footer(text=f"Joined: {datetime.now().strftime('%d %b %Y')}")
+    
+    await channel.send(content=member.mention, embed=embed)
 
 # --- SLASH COMMAND ---
 @bot.tree.command(name="ticket-panel", description="Post the ticket creation panel")
