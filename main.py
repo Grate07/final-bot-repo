@@ -8,6 +8,8 @@ from flask import Flask
 from threading import Thread
 from datetime import datetime
 import json
+import gc
+gc.set_threshold(700, 10, 10)
 
 # --- KEEP RENDER ALIVE ---
 app = Flask('')
@@ -17,7 +19,8 @@ def home():
     return "Bot is running!"
 
 def run():
-    app.run(host='0.0.0.0', port=8080)
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
     t = Thread(target=run)
@@ -162,7 +165,6 @@ async def on_ready():
     bot.add_view(TicketPanel())
     bot.add_view(CloseTicket())
 
-    # Sync commands to all servers instantly
     for guild in bot.guilds:
         try:
             bot.tree.copy_global_to(guild=guild)
@@ -177,7 +179,6 @@ async def on_ready():
 async def on_member_join(member):
     guild_config = get_guild_config(member.guild.id)
 
-    # 1. Auto role
     role_id = guild_config.get("auto_role")
     if role_id:
         role = member.guild.get_role(role_id)
@@ -187,7 +188,6 @@ async def on_member_join(member):
             except discord.Forbidden:
                 print("Bot doesn't have permission to give that role. Move bot role higher.")
 
-    # 2. Welcome message
     channel_id = guild_config.get("welcome_channel")
     if channel_id:
         channel = bot.get_channel(channel_id)
