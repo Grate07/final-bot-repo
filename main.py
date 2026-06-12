@@ -34,8 +34,8 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # --- CONFIG ---
-TICKET_CATEGORY_NAME = "Tickets"
-STAFF_ROLE_NAME = "Staff"
+TICKET_CATEGORY_ID = 1513372898058833981 # Your category ID
+STAFF_ROLE_NAME = "Staff" # Change to role ID if you want: STAFF_ROLE_ID = 123...
 LOG_CHANNEL_ID = 1513387589514694747
 CONFIG_FILE = "config.json"
 
@@ -65,47 +65,47 @@ def set_guild_config(guild_id, key, value):
     config[guild_id][key] = value
     save_config(config)
 
-# --- TICKET PANEL VIEW ---
+# --- TICKET PANEL VIEW - RUNCANDELS ---
 class TicketPanel(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Create Ticket", style=discord.ButtonStyle.green, custom_id="create_ticket", emoji="🎫")
-    async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def create_ticket_channel(self, interaction: discord.Interaction, ticket_type: str):
         guild = interaction.guild
         user = interaction.user
 
-        existing_ticket = discord.utils.get(guild.text_channels, name=f"ticket-{user.name.lower()}")
+        existing_ticket = discord.utils.get(guild.text_channels, name=f"{ticket_type.lower()}-{user.name.lower()}")
         if existing_ticket:
-            await interaction.response.send_message(f"You already have a ticket: {existing_ticket.mention}", ephemeral=True)
+            await interaction.response.send_message(f"You already have an open {ticket_type} ticket: {existing_ticket.mention}", ephemeral=True)
             return
 
-        category = discord.utils.get(guild.categories, name=TICKET_CATEGORY_NAME)
+        category = guild.get_channel(TICKET_CATEGORY_ID) # Now uses ID
         if not category:
-            category = await guild.create_category(TICKET_CATEGORY_NAME)
+            await interaction.response.send_message("Ticket category not found. Contact an admin.", ephemeral=True)
+            return
 
         staff_role = discord.utils.get(guild.roles, name=STAFF_ROLE_NAME)
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+            user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True, embed_links=True),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
         }
         if staff_role:
             overwrites[staff_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
 
         channel = await guild.create_text_channel(
-            name=f"ticket-{user.name}",
+            name=f"{ticket_type.lower()}-{user.name}",
             category=category,
-            overwrites=overwrites
+            overwrites=overwrites,
+            topic=f"{ticket_type} ticket for {user.id}"
         )
 
         embed = discord.Embed(
-            title="🎫 Support Ticket",
-            description=f"Hey {user.mention}, thanks for creating a ticket!",
+            title=f"🎫 {ticket_type} Ticket",
+            description=f"Hey {user.mention}, thanks for contacting RUNCANDELS Support!\n\nPlease describe your issue in detail. A staff member will assist you shortly.",
             color=discord.Color.blue()
         )
-        embed.add_field(name="How to proceed", value="Please describe your issue in detail. A staff member will assist you shortly.", inline=False)
         embed.add_field(name="Close ticket", value="Click the 🔒 button below when your issue is resolved.", inline=False)
         embed.set_footer(text=f"User ID: {user.id}")
 
@@ -114,7 +114,15 @@ class TicketPanel(discord.ui.View):
             ping_content += f" {staff_role.mention}"
 
         await channel.send(content=ping_content, embed=embed, view=CloseTicket())
-        await interaction.response.send_message(f"Ticket created: {channel.mention}", ephemeral=True)
+        await interaction.response.send_message(f"Your {ticket_type} ticket has been created: {channel.mention}", ephemeral=True)
+
+    @discord.ui.button(label="General Support", style=discord.ButtonStyle.blurple, custom_id="general_support", emoji="🛠️")
+    async def general_support(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.create_ticket_channel(interaction, "General")
+
+    @discord.ui.button(label="Report", style=discord.ButtonStyle.green, custom_id="report_member", emoji="🚨")
+    async def report(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.create_ticket_channel(interaction, "Report")
 
 # --- CLOSE TICKET VIEW ---
 class CloseTicket(discord.ui.View):
@@ -195,14 +203,15 @@ async def on_member_join(member):
             await send_welcome(member, channel)
 
 # --- SLASH COMMANDS ---
-@bot.tree.command(name="ticket-panel", description="Post the ticket creation panel")
+@bot.tree.command(name="ticket-panel", description="Post the RUNCANDELS ticket panel")
 @app_commands.checks.has_permissions(administrator=True)
 async def ticket_panel(interaction: discord.Interaction):
     embed = discord.Embed(
-        title="Support Tickets",
-        description="Click the button below to create a support ticket.\nOur staff will assist you as soon as possible.",
-        color=discord.Color.blue()
+        title="📩 RUNCANDELS Help Desk",
+        description="Select a category below to open a ticket.\n\n🛠️ **General Support** — General help\n🚨 **Report** — Report a member\n\nOne active ticket per user per category.",
+        color=discord.Color.from_rgb(88, 101, 242)
     )
+    embed.set_footer(text="RUNCANDELS Support Team")
     await interaction.response.send_message(embed=embed, view=TicketPanel())
 
 @bot.tree.command(name="welcomeset", description="Set the welcome channel")
