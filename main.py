@@ -479,7 +479,6 @@ async def confess(interaction: discord.Interaction, text: str):
         pass
 
     channel = bot.get_channel(CONFESS_CHANNEL)
-        channel = bot.get_channel(CONFESS_CHANNEL)
     if not channel:
         await interaction.followup.send("Confession channel not found.", ephemeral=True)
         return
