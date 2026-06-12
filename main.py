@@ -9,6 +9,8 @@ from threading import Thread
 from datetime import datetime
 import json
 import gc
+import random
+from groq import Groq
 gc.set_threshold(700, 10, 10)
 
 # --- KEEP RENDER ALIVE ---
@@ -34,10 +36,14 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # --- CONFIG ---
-TICKET_CATEGORY_ID = 1513372898058833981 # Your category ID
-STAFF_ROLE_NAME = "Staff" # Change to role ID if you want: STAFF_ROLE_ID = 123...
+TICKET_CATEGORY_ID = 1513372898058833981
+STAFF_ROLE_NAME = "Staff"
 LOG_CHANNEL_ID = 1513387589514694747
 CONFIG_FILE = "config.json"
+LEVELS_FILE = "levels.json"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+AI_CHANNEL_ID = 1514982328584241316 # Your #ai-chat
+groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 # --- CONFIG HANDLERS ---
 def load_config():
@@ -65,6 +71,27 @@ def set_guild_config(guild_id, key, value):
     config[guild_id][key] = value
     save_config(config)
 
+# --- LEVEL SYSTEM ---
+def load_levels():
+    if os.path.exists(LEVELS_FILE):
+        with open(LEVELS_FILE, 'r') as f:
+            return json.load(f)
+    return {}
+
+def save_levels(data):
+    with open(LEVELS_FILE, 'w') as f:
+        json.dump(data, f, indent=4)
+
+def get_xp_for_level(level):
+    return 5 * (level ** 2) + 50 * level + 100
+
+def get_level_from_xp(xp):
+    level = 0
+    while xp >= get_xp_for_level(level):
+        xp -= get_xp_for_level(level)
+        level += 1
+    return level
+
 # --- TICKET PANEL VIEW - RUNCANDELS ---
 class TicketPanel(discord.ui.View):
     def __init__(self):
@@ -79,7 +106,7 @@ class TicketPanel(discord.ui.View):
             await interaction.response.send_message(f"You already have an open {ticket_type} ticket: {existing_ticket.mention}", ephemeral=True)
             return
 
-        category = guild.get_channel(TICKET_CATEGORY_ID) # Now uses ID
+        category = guild.get_channel(TICKET_CATEGORY_ID)
         if not category:
             await interaction.response.send_message("Ticket category not found. Contact an admin.", ephemeral=True)
             return
@@ -202,6 +229,60 @@ async def on_member_join(member):
         if channel:
             await send_welcome(member, channel)
 
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    # LEVELING SYSTEM
+    if message.guild and not message.content.startswith('!'):
+        levels = load_levels()
+        guild_id = str(message.guild.id)
+        user_id = str(message.author.id)
+
+        if guild_id not in levels:
+            levels[guild_id] = {}
+        if user_id not in levels[guild_id]:
+            levels[guild_id][user_id] = {"xp": 0, "level": 0, "last_msg": 0}
+
+        if (datetime.now().timestamp() - levels[guild_id][user_id]["last_msg"]) > 60:
+            xp_gain = random.randint(15, 25)
+            levels[guild_id][user_id]["xp"] += xp_gain
+            levels[guild_id][user_id]["last_msg"] = datetime.now().timestamp()
+
+            current_level = levels[guild_id][user_id]["level"]
+            new_level = get_level_from_xp(levels[guild_id][user_id]["xp"])
+
+            if new_level > current_level:
+                levels[guild_id][user_id]["level"] = new_level
+                embed = discord.Embed(title="🎉 Level Up!", description=f"{message.author.mention} reached level **{new_level}**!", color=discord.Color.gold())
+                await message.channel.send(embed=embed, delete_after=10)
+            save_levels(levels)
+
+    # AI CHAT - auto reply in specific channel
+    if groq_client and (bot.user in message.mentions or (AI_CHANNEL_ID!= 0 and message.channel.id == AI_CHANNEL_ID)):
+        if message.content.startswith('!'):
+            await bot.process_commands(message)
+            return
+        async with message.channel.typing():
+            try:
+                content = message.content.replace(f'<@{bot.user.id}>', '').strip()
+                if not content: return
+                chat_completion = groq_client.chat.completions.create(
+                    messages=[
+                        {"role": "system", "content": "You are RUNCANDELS AI for the RUNCANDELS Discord server. Be friendly, casual, use emojis. Keep replies under 300 chars unless asked for detail. You help with server questions, general chat, and keep vibes good. Never say you're an AI assistant - just be RUNCANDELS AI."},
+                        {"role": "user", "content": content}
+                    ],
+                    model="llama-3.1-8b-instant",
+                    max_tokens=400
+                )
+                await message.reply(chat_completion.choices[0].message.content[:2000])
+            except Exception as e:
+                print(f"AI Error: {e}")
+                await message.reply("AI is down rn 😴")
+
+    await bot.process_commands(message)
+
 # --- SLASH COMMANDS ---
 @bot.tree.command(name="ticket-panel", description="Post the RUNCANDELS ticket panel")
 @app_commands.checks.has_permissions(administrator=True)
@@ -246,6 +327,57 @@ async def welcome(interaction: discord.Interaction, action: str):
             await interaction.response.send_message("Welcome channel not found.", ephemeral=True)
     else:
         await interaction.response.send_message("Use `/welcome test` to send a test message.", ephemeral=True)
+
+@bot.tree.command(name="rank", description="Check your level and XP")
+async def rank(interaction: discord.Interaction, member: discord.Member = None):
+    if member is None:
+        member = interaction.user
+
+    levels = load_levels()
+    guild_id = str(interaction.guild.id)
+    user_id = str(member.id)
+
+    if guild_id not in levels or user_id not in levels[guild_id]:
+        await interaction.response.send_message(f"{member.mention} hasn't earned any XP yet!", ephemeral=True)
+        return
+
+    user_data = levels[guild_id][user_id]
+    level = user_data["level"]
+    xp = user_data["xp"]
+
+    current_level_xp = sum([get_xp_for_level(i) for i in range(level)])
+    next_level_xp = get_xp_for_level(level)
+    progress = xp - current_level_xp
+
+    embed = discord.Embed(title=f"{member.display_name}'s Rank", color=discord.Color.blurple())
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.add_field(name="Level", value=f"`{level}`", inline=True)
+    embed.add_field(name="XP", value=f"`{xp}`", inline=True)
+    embed.add_field(name="Progress", value=f"`{progress}/{next_level_xp}`", inline=True)
+
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="leaderboard", description="Show the server XP leaderboard")
+async def leaderboard(interaction: discord.Interaction):
+    levels = load_levels()
+    guild_id = str(interaction.guild.id)
+
+    if guild_id not in levels or not levels[guild_id]:
+        await interaction.response.send_message("No one has earned XP yet!", ephemeral=True)
+        return
+
+    sorted_users = sorted(levels[guild_id].items(), key=lambda x: x[1]["xp"], reverse=True)[:10]
+
+    embed = discord.Embed(title="🏆 RUNCANDELS Leaderboard", color=discord.Color.gold())
+
+    desc = ""
+    for i, (user_id, data) in enumerate(sorted_users, 1):
+        user = interaction.guild.get_member(int(user_id))
+        if user:
+            desc += f"**{i}.** {user.mention} - Level `{data['level']}` | `{data['xp']}` XP\n"
+
+    embed.description = desc if desc else "No data"
+    await interaction.response.send_message(embed=embed)
 
 @ticket_panel.error
 @welcomeset.error
