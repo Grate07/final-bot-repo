@@ -451,29 +451,28 @@ async def roast(interaction: discord.Interaction, user: discord.Member):
         print(f"Roast error: {e}")
         await interaction.followup.send("AI is taking an L rn, try again later.")
 
-@bot.tree.command(name="kill", description="Dramatically kill someone")
-@app_commands.describe(user="Target")
-@app_commands.checks.cooldown(1, 15)
-async def kill(interaction: discord.Interaction, user: discord.Member):
-    await interaction.response.defer()
-
-    if user.id == interaction.user.id:
-        await interaction.followup.send("You died from cringe 💀")
-        return
+@bot.tree.command(name="confess", description="Send an anonymous confession")
+@app_commands.describe(text="Your confession")
+async def confess(interaction: discord.Interaction, text: str):
+    await interaction.response.defer(ephemeral=True)
 
     try:
-        response = requests.post(
+        mod_check = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
             json={
                 "model": "llama-3.1-8b-instant",
                 "messages": [
-                    {"role": "system", "content": "Write a funny, over-the-top, fake video game style death scene. 1-2 sentences. No real violence or gore. PG-13. Make it absurd."},
-                    {"role": "user", "content": f"{interaction.user.name} killed {user.name}"}
+                    {"role": "system", "content": "You are a content filter. Reply ONLY with 'SAFE' or 'UNSAFE'. Mark as UNSAFE if confession contains: real names, doxxing, illegal activity, self-harm, threats, sexual content involving minors."},
+                    {"role": "user", "content": text}
                 ],
-                "max_tokens": 80
+                "max_tokens": 5
             }
         )
-        death = response.json()['choices'][0]['message']['content']
-        await interaction.followup.send(f"💀 {death}")
+        result = mod_check.json()['choices'][0]['message']['content']
+
+        if "UNSAFE" in result.upper():
+            await interaction.followup.send("Confession blocked. Keep it legal and safe.", ephemeral=True)
+            return
+
     excep
