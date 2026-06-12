@@ -475,10 +475,14 @@ async def confess(interaction: discord.Interaction, text: str):
             await interaction.followup.send("Confession blocked. Keep it legal and safe.", ephemeral=True)
             return
 
-    except:
+        except:
         pass
 
     channel = bot.get_channel(CONFESS_CHANNEL)
     if not channel:
         await interaction.followup.send("Confession channel not found.", ephemeral=True)
         return
+
+    embed = discord.Embed(title="📢 Anonymous Confession", description=text, color=discord.Color.dark_grey())
+    await channel.send(embed=embed)
+    await interaction.followup.send("Confession sent ✅", ephemeral=True)
