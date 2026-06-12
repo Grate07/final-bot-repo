@@ -11,6 +11,7 @@ import json
 import gc
 import random
 from groq import Groq
+import requests
 gc.set_threshold(700, 10, 10)
 
 # --- KEEP RENDER ALIVE ---
@@ -43,6 +44,13 @@ CONFIG_FILE = "config.json"
 LEVELS_FILE = "levels.json"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 AI_CHANNEL_ID = 1514982328584241316 # Your #ai-chat
+CONFESS_CHANNEL = 1514982328584241316 # Same as AI chat
+LEVEL_ROLES = {
+    5: 1485818597870796840, # Newbie
+    10: 1485817312098385950, # Yapper
+    20: 1485817682682183731, # Zipperino
+    50: 1485817752965877790 # Zipperino +
+}
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 # --- CONFIG HANDLERS ---
@@ -234,7 +242,7 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # LEVELING SYSTEM
+    # LEVELING SYSTEM WITH ROLE REWARDS
     if message.guild and not message.content.startswith('!'):
         levels = load_levels()
         guild_id = str(message.guild.id)
@@ -256,6 +264,17 @@ async def on_message(message):
             if new_level > current_level:
                 levels[guild_id][user_id]["level"] = new_level
                 embed = discord.Embed(title="🎉 Level Up!", description=f"{message.author.mention} reached level **{new_level}**!", color=discord.Color.gold())
+
+                # LEVEL ROLE REWARDS
+                if new_level in LEVEL_ROLES:
+                    role = message.guild.get_role(LEVEL_ROLES[new_level])
+                    if role and role not in message.author.roles:
+                        try:
+                            await message.author.add_roles(role, reason=f"Reached level {new_level}")
+                            embed.add_field(name="Role Unlocked!", value=f"You earned the {role.mention} role", inline=False)
+                        except discord.Forbidden:
+                            embed.add_field(name="Role Error", value="I can't give that role. Move my role higher.", inline=False)
+
                 await message.channel.send(embed=embed, delete_after=10)
             save_levels(levels)
 
@@ -379,14 +398,82 @@ async def leaderboard(interaction: discord.Interaction):
     embed.description = desc if desc else "No data"
     await interaction.response.send_message(embed=embed)
 
-@ticket_panel.error
-@welcomeset.error
-@autorole.error
-@welcome.error
-async def cmd_error(interaction: discord.Interaction, error):
-    if isinstance(error, app_commands.errors.MissingPermissions):
-        await interaction.response.send_message("You need Administrator permission to use this.", ephemeral=True)
+@bot.tree.command(name="rewards", description="Show all level role rewards")
+async def rewards(interaction: discord.Interaction):
+    embed = discord.Embed(title="🏅 Level Rewards", description="Reach these levels to unlock roles:", color=discord.Color.blue())
+    for level, role_id in sorted(LEVEL_ROLES.items()):
+        role = interaction.guild.get_role(role_id)
+        if role:
+            embed.add_field(name=f"Level {level}", value=role.mention, inline=True)
 
-# --- RUN BOT ---
-keep_alive()
-bot.run(os.getenv("TOKEN"))
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="roast", description="Get RUNCANDELS AI to roast someone")
+@app_commands.describe(user="Who to roast")
+@app_commands.checks.cooldown(1, 30)
+async def roast(interaction: discord.Interaction, user: discord.Member):
+    await interaction.response.defer()
+
+    if user.id == interaction.user.id:
+        await interaction.followup.send("Roasting yourself? That's the first L 💀")
+        return
+    if user.bot:
+        await interaction.followup.send("I don't roast my own kind.")
+        return
+
+    messages = []
+    async for msg in interaction.channel.history(limit=100):
+        if msg.author.id == user.id and not msg.content.startswith('/'):
+            messages.append(msg.content)
+        if len(messages) >= 10:
+            break
+
+    context = "\n".join(messages[:5]) if messages else "No recent messages"
+
+    try:
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            json={
+                "model": "llama-3.1-8b-instant",
+                "messages": [
+                    {"role": "system", "content": "You are RUNCANDELS AI. Roast the user. Keep it funny, light, gaming slang. No real insults, racism, slurs, or suicide jokes. Max 2 sentences. Use their recent messages for ammo."},
+                    {"role": "user", "content": f"Roast this user. Their recent messages: {context}"}
+                ],
+                "max_tokens": 100
+            }
+        )
+        roast_text = response.json()['choices'][0]['message']['content']
+        embed = discord.Embed(title="🔥 Roasted", description=f"{user.mention}\n\n{roast_text}", color=discord.Color.orange())
+        embed.set_footer(text=f"Requested by {interaction.user.name}")
+        await interaction.followup.send(embed=embed)
+    except Exception as e:
+        print(f"Roast error: {e}")
+        await interaction.followup.send("AI is taking an L rn, try again later.")
+
+@bot.tree.command(name="kill", description="Dramatically kill someone")
+@app_commands.describe(user="Target")
+@app_commands.checks.cooldown(1, 15)
+async def kill(interaction: discord.Interaction, user: discord.Member):
+    await interaction.response.defer()
+
+    if user.id == interaction.user.id:
+        await interaction.followup.send("You died from cringe 💀")
+        return
+
+    try:
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            json={
+                "model": "llama-3.1-8b-instant",
+                "messages": [
+                    {"role": "system", "content": "Write a funny, over-the-top, fake video game style death scene. 1-2 sentences. No real violence or gore. PG-13. Make it absurd."},
+                    {"role": "user", "content": f"{interaction.user.name} killed {user.name}"}
+                ],
+                "max_tokens": 80
+            }
+        )
+        death = response.json()['choices'][0]['message']['content']
+        await interaction.followup.send(f"💀 {death}")
+    excep
