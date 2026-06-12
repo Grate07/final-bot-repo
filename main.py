@@ -43,13 +43,13 @@ LOG_CHANNEL_ID = 1513387589514694747
 CONFIG_FILE = "config.json"
 LEVELS_FILE = "levels.json"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-AI_CHANNEL_ID = 1514982328584241316 # Your #ai-chat
-CONFESS_CHANNEL = 1514982328584241316 # Same as AI chat
+AI_CHANNEL_ID = 1514982328584241316
+CONFESS_CHANNEL = 1514982328584241316
 LEVEL_ROLES = {
-    5: 1485818597870796840, # Newbie
-    10: 1485817312098385950, # Yapper
-    20: 1485817682682183731, # Zipperino
-    50: 1485817752965877790 # Zipperino +
+    5: 1485818597870796840,
+    10: 1485817312098385950,
+    20: 1485817682682183731,
+    50: 1485817752965877790
 }
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
@@ -475,4 +475,8 @@ async def confess(interaction: discord.Interaction, text: str):
             await interaction.followup.send("Confession blocked. Keep it legal and safe.", ephemeral=True)
             return
 
-    excep
+    except:
+        pass
+
+    channel = bot.get_channel(CONFESS_CHANNEL)
+    if not cha
