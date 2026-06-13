@@ -495,11 +495,7 @@ async def roast(interaction: discord.Interaction, user: discord.Member):
             messages=[
                 {
                     "role": "system",
-                    "content": (
-                        "You are RUNCANDELS AI. Roast the user savagely "
-                        "but keep it playful, no slurs or hate. "
-                        "Maximum 2 sentences. Use emojis."
-                    )
+                    "content": "You are RUNCANDELS AI. Roast the user savagely but keep it playful, no slurs or hate. Maximum 2 sentences. Use emojis."
                 },
                 {
                     "role": "user",
@@ -509,13 +505,17 @@ async def roast(interaction: discord.Interaction, user: discord.Member):
             model="llama-3.1-8b-instant",
             max_tokens=100
         )
-
         roast_text = chat_completion.choices[0].message.content
-
-        await interaction.followup.send(
-            f"{user.mention} 🔥\n{roast_text}"
-        )
-
+        await interaction.followup.send(f"{user.mention} 🔥\n{roast_text}")
     except Exception as e:
         print(f"Roast Error: {e}")
         await interaction.followup.send("Roast machine broke 💀")
+
+# --- START BOT ---
+if __name__ == "__main__":
+    keep_alive()
+    token = os.getenv("DISCORD_TOKEN")
+    if token:
+        bot.run(token)
+    else:
+        print("DISCORD_TOKEN not set!")
