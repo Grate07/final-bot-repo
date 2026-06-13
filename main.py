@@ -572,11 +572,6 @@ async def roast(interaction: discord.Interaction, user: discord.Member):
         print(f"Roast Error: {e}")
         await interaction.followup.send("Couldn't roast them... they're too powerful 😔")
 
-@bot.event
-async def on_disconnect():
-    if http_session:
-        await http_session.close()
-
 # --- START BOT ---
 if __name__ == "__main__":
     keep_alive()
