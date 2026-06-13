@@ -1,17 +1,19 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 import chat_exporter
 import io
 import os
 from flask import Flask
 from threading import Thread
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import gc
 import random
 from groq import Groq
 import requests
+import aiohttp
+import time
 gc.set_threshold(700, 10, 10)
 
 # --- KEEP RENDER ALIVE ---
@@ -43,6 +45,7 @@ LOG_CHANNEL_ID = 1513387589514694747
 CONFIG_FILE = "config.json"
 LEVELS_FILE = "levels.json"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+HF_TOKEN = os.getenv("HF_TOKEN") # For AI image gen
 AI_CHANNEL_ID = 1514982328584241316
 CONFESS_CHANNEL = 1514982328584241316
 LEVEL_ROLES = {
@@ -51,6 +54,13 @@ LEVEL_ROLES = {
     20: 1485817682682183731,
     50: 1485817752965877790
 }
+# --- NEW CONFIG FOR FEATURES 4 & 5 ---
+STATS_GUILD_ID = 1465300538491932869 # Your server ID
+STATS_MEMBER_CHANNEL = 1514982328584241317 # Voice channel ID for member count
+STATS_BOT_CHANNEL = 1514982328584241318 # Voice channel ID for bot count
+BANNED_WORDS = ["badword1", "slur2"] # Add your words here
+INVITE_WHITELIST = [] # Add channel IDs where invites are allowed
+
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 # --- CONFIG HANDLERS ---
@@ -202,11 +212,40 @@ async def send_welcome(member, channel):
 
     await channel.send(embed=embed)
 
+# --- FEATURE 4: SERVER STATS CHANNELS ---
+@tasks.loop(minutes=5)
+async def update_stats():
+    guild = bot.get_guild(STATS_GUILD_ID)
+    if not guild:
+        return
+
+    # Member count
+    member_channel = bot.get_channel(STATS_MEMBER_CHANNEL)
+    if member_channel:
+        try:
+            await member_channel.edit(name=f"👥 Members: {guild.member_count}")
+        except:
+            pass
+
+    # Bot count
+    bot_channel = bot.get_channel(STATS_BOT_CHANNEL)
+    if bot_channel:
+        try:
+            bot_count = len([m for m in guild.members if m.bot])
+            await bot_channel.edit(name=f"🤖 Bots: {bot_count}")
+        except:
+            pass
+
+@update_stats.before_loop
+async def before_update_stats():
+    await bot.wait_until_ready()
+
 # --- BOT EVENTS ---
 @bot.event
 async def on_ready():
     bot.add_view(TicketPanel())
     bot.add_view(CloseTicket())
+    update_stats.start() # Start stats loop
 
     for guild in bot.guilds:
         try:
@@ -241,6 +280,47 @@ async def on_member_join(member):
 async def on_message(message):
     if message.author.bot:
         return
+
+    # --- FEATURE 5: AUTOMOD + ANTI-SPAM ---
+    # Skip if user is admin/mod
+    if not message.author.guild_permissions.manage_messages:
+        # 1. Anti-invite
+        if "discord.gg/" in message.content.lower() or "discord.com/invite/" in message.content.lower():
+            if message.channel.id not in INVITE_WHITELIST:
+                await message.delete()
+                await message.channel.send(f"{message.author.mention} No server invites allowed.", delete_after=5)
+                return
+
+        # 2. Banned words
+        content_lower = message.content.lower()
+        for word in BANNED_WORDS:
+            if word in content_lower:
+                await message.delete()
+                await message.channel.send(f"{message.author.mention} That word is not allowed.", delete_after=5)
+                return
+
+        # 3. Spam detection: 5+ messages in 10s
+        if not hasattr(bot, 'spam_check'):
+            bot.spam_check = {}
+
+        user_id = message.author.id
+        now = time.time()
+
+        if user_id not in bot.spam_check:
+            bot.spam_check[user_id] = []
+
+        bot.spam_check[user_id] = [t for t in bot.spam_check[user_id] if now - t < 10]
+        bot.spam_check[user_id].append(now)
+
+        if len(bot.spam_check[user_id]) > 5:
+            await message.delete()
+            try:
+                await message.author.timeout(discord.utils.utcnow() + timedelta(seconds=60), reason="AutoMod: Spam")
+                await message.channel.send(f"{message.author.mention} timed out for 60s for spamming.", delete_after=5)
+            except:
+                pass
+            bot.spam_check[user_id] = []
+            return
 
     # LEVELING SYSTEM WITH ROLE REWARDS
     if message.guild and not message.content.startswith('!'):
@@ -415,91 +495,4 @@ async def roast(interaction: discord.Interaction, user: discord.Member):
     await interaction.response.defer()
 
     if user.id == interaction.user.id:
-        await interaction.followup.send("Roasting yourself? That's the first L 💀")
-        return
-    if user.bot:
-        await interaction.followup.send("I don't roast my own kind.")
-        return
-
-    messages = []
-    async for msg in interaction.channel.history(limit=100):
-        if msg.author.id == user.id and not msg.content.startswith('/'):
-            messages.append(msg.content)
-        if len(messages) >= 10:
-            break
-
-    context = "\n".join(messages[:5]) if messages else "No recent messages"
-
-    try:
-        response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={
-                "model": "llama-3.1-8b-instant",
-                "messages": [
-                    {"role": "system", "content": "You are RUNCANDELS AI. Roast the user. Keep it funny, light, gaming slang. No real insults, racism, slurs, or suicide jokes. Max 2 sentences. Use their recent messages for ammo."},
-                    {"role": "user", "content": f"Roast this user. Their recent messages: {context}"}
-                ],
-                "max_tokens": 100
-            }
-        )
-        roast_text = response.json()['choices'][0]['message']['content']
-        embed = discord.Embed(title="🔥 Roasted", description=f"{user.mention}\n\n{roast_text}", color=discord.Color.orange())
-        embed.set_footer(text=f"Requested by {interaction.user.name}")
-        await interaction.followup.send(embed=embed)
-    except Exception as e:
-        print(f"Roast error: {e}")
-        await interaction.followup.send("AI is taking an L rn, try again later.")
-
-@bot.tree.command(name="confess", description="Send an anonymous confession")
-@app_commands.describe(text="Your confession")
-async def confess(interaction: discord.Interaction, text: str):
-    await interaction.response.defer(ephemeral=True)
-
-    try:
-        mod_check = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={
-                "model": "llama-3.1-8b-instant",
-                "messages": [
-                    {"role": "system", "content": "You are a content filter. Reply ONLY with 'SAFE' or 'UNSAFE'. Mark as UNSAFE if confession contains: real names, doxxing, illegal activity, self-harm, threats, sexual content involving minors."},
-                    {"role": "user", "content": text}
-                ],
-                "max_tokens": 5
-            }
-        )
-        result = mod_check.json()['choices'][0]['message']['content']
-
-        if "UNSAFE" in result.upper():
-            await interaction.followup.send("Confession blocked. Keep it legal and safe.", ephemeral=True)
-            return
-
-    except:
-        pass
-
-    channel = bot.get_channel(CONFESS_CHANNEL)
-    if not channel:
-        await interaction.followup.send("Confession channel not found.", ephemeral=True)
-        return
-
-    embed = discord.Embed(title="📢 Anonymous Confession", description=text, color=discord.Color.dark_grey())
-    await channel.send(embed=embed)
-    await interaction.followup.send("Confession sent ✅", ephemeral=True)
-
-@roast.error
-async def fun_cmd_error(interaction: discord.Interaction, error):
-    if isinstance(error, app_commands.CommandOnCooldown):
-        await interaction.response.send_message(f"Chill 💀 Wait {error.retry_after:.0f}s", ephemeral=True)
-
-@ticket_panel.error
-@welcomeset.error
-@autorole.error
-@welcome.error
-async def cmd_error(interaction: discord.Interaction, error):
-    if isinstance(error, app_commands.errors.MissingPermissions):
-        await interaction.response.send_message("You need Administrator permission to use this.", ephemeral=True)
-
-# --- RUN BOT ---
-keep_alive()
-bot.run(os.getenv("TOKEN"))
+        await interact
