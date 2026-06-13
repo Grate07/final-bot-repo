@@ -14,6 +14,7 @@ from groq import Groq
 import requests
 import time
 import asyncio
+import aiohttp
 gc.set_threshold(700, 10, 10)
 
 # --- KEEP RENDER ALIVE ---
@@ -371,6 +372,51 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
+# --- IMAGINE COMMAND - HUGGING FACE ---
+@bot.command(name="imagine")
+@commands.cooldown(1, 30, commands.BucketType.user)
+async def imagine(ctx, *, prompt: str = None):
+    if ctx.channel.id!= AI_CHANNEL_ID:
+        return await ctx.reply(f"Use this in <#{AI_CHANNEL_ID}> only.", delete_after=5)
+
+    if not prompt:
+        return await ctx.reply("What should I imagine? `!imagine a cyberpunk penguin`")
+
+    msg = await ctx.reply(f"🎨 Asking Hugging Face to draw: `{prompt}`\nCan take 20-60s if servers are sleeping...")
+    try:
+        API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
+        headers = {"Authorization": f"Bearer {HF_TOKEN}"} if HF_TOKEN else {}
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(API_URL, headers=headers, json={"inputs": prompt}) as response:
+                if response.status == 503:
+                    return await msg.edit(content="HF models are loading. Try again in 20s.")
+                if response.status == 429:
+                    return await msg.edit(content="Rate limited. Get a free HF_TOKEN to fix this.")
+                if response.status!= 200:
+                    return await msg.edit(content=f"HF error {response.status}. Try a different prompt.")
+
+                image_bytes = await response.read()
+
+        file = discord.File(io.BytesIO(image_bytes), filename="imagine.png")
+        await msg.delete()
+
+        embed = discord.Embed(title="Generated Image", description=f"`{prompt}`", color=0x5865F2)
+        embed.set_image(url="attachment://imagine.png")
+        embed.set_footer(text=f"Requested by {ctx.author.display_name}")
+        await ctx.send(embed=embed, file=file)
+
+    except Exception as e:
+        await msg.edit(content=f"Failed: `{e}`. HF might be down.")
+        print(f"Imagine Error: {e}")
+
+@imagine.error
+async def imagine_error(ctx, error):
+    if isinstance(error, commands.CommandOnCooldown):
+        await ctx.reply(f"Chill. Wait {error.retry_after:.0f}s", delete_after=5)
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.reply("Give me a prompt: `!imagine a red panda`")
+
 # --- SLASH COMMANDS ---
 @bot.tree.command(name="ticket-panel", description="Post the RUNCANDELS ticket panel")
 @app_commands.checks.has_permissions(administrator=True)
@@ -503,13 +549,57 @@ async def roast(interaction: discord.Interaction, user: discord.Member):
                 }
             ],
             model="llama-3.1-8b-instant",
-            max_tokens=100
+            max_tokens=150
         )
-        roast_text = chat_completion.choices[0].message.content
-        await interaction.followup.send(f"{user.mention} 🔥\n{roast_text}")
+        await interaction.followup.send(f"{user.mention} {chat_completion.choices[0].message.content}")
     except Exception as e:
         print(f"Roast Error: {e}")
-        await interaction.followup.send("Roast machine broke 💀")
+        await interaction.followup.send("Couldn't roast them, they're too powerful 😭")
+
+# --- IMAGINE COMMAND - HUGGING FACE ---
+@bot.command(name="imagine")
+@commands.cooldown(1, 30, commands.BucketType.user)
+async def imagine(ctx, *, prompt: str = None):
+    if ctx.channel.id!= AI_CHANNEL_ID:
+        return await ctx.reply(f"Use this in <#{AI_CHANNEL_ID}> only.", delete_after=5)
+
+    if not prompt:
+        return await ctx.reply("What should I imagine? `!imagine a cyberpunk penguin`")
+
+    msg = await ctx.reply(f"🎨 Asking Hugging Face to draw: `{prompt}`\nCan take 20-60s if servers are sleeping...")
+    try:
+        API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
+        headers = {"Authorization": f"Bearer {HF_TOKEN}"} if HF_TOKEN else {}
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(API_URL, headers=headers, json={"inputs": prompt}) as response:
+                if response.status == 503:
+                    return await msg.edit(content="HF models are loading. Try again in 20s.")
+                if response.status == 429:
+                    return await msg.edit(content="Rate limited. Get a free HF_TOKEN to fix this.")
+                if response.status!= 200:
+                    return await msg.edit(content=f"HF error {response.status}. Try a different prompt.")
+
+                image_bytes = await response.read()
+
+        file = discord.File(io.BytesIO(image_bytes), filename="imagine.png")
+        await msg.delete()
+
+        embed = discord.Embed(title="Generated Image", description=f"`{prompt}`", color=0x5865F2)
+        embed.set_image(url="attachment://imagine.png")
+        embed.set_footer(text=f"Requested by {ctx.author.display_name}")
+        await ctx.send(embed=embed, file=file)
+
+    except Exception as e:
+        await msg.edit(content=f"Failed: `{e}`. HF might be down.")
+        print(f"Imagine Error: {e}")
+
+@imagine.error
+async def imagine_error(ctx, error):
+    if isinstance(error, commands.CommandOnCooldown):
+        await ctx.reply(f"Chill. Wait {error.retry_after:.0f}s", delete_after=5)
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.reply("Give me a prompt: `!imagine a red panda`")
 
 # --- START BOT ---
 if __name__ == "__main__":
