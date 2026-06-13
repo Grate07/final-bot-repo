@@ -489,12 +489,12 @@ async def roast(interaction: discord.Interaction, user: discord.Member):
 
     if not groq_client:
         await interaction.followup.send("AI is not set up.")
-        return
+       return
 
-        try:
-           chat_completion = groq_client.create(
-               messages= [
-                   {"roles": "system" , "content": "You are RUNCANDELS AI. ROAST the user savagely but keep it playful, no slurs or actual hate. Max 2 sentences. Use emoji."},
+       try:
+           chat_completion = groq_client.chat.completions.create(
+               messages=[
+                   {"role": "system" , "content": "You are RUNCANDELS AI. ROAST the user savagely but keep it playful, no slurs or actual hate. Max 2 sentences. Use emoji."},
                     {"roles": "user", "content": f"Roast this person: {user.display_name}"}
                 ],
                 model="llama-3.1-8b instant",
