@@ -65,8 +65,6 @@ INVITE_WHITELIST = []
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 # --- RENDER FIX: Force IPv4 for Hugging Face ---
-connector = aiohttp.TCPConnector(family=socket.AF_INET)
-http_session = None
 
 # --- CONFIG HANDLERS ---
 def load_config():
