@@ -3,3 +3,4 @@ chat-exporter==2.4.1
 Flask==3.0.3
 groq
 requests
+aiohttp
