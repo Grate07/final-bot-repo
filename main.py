@@ -574,11 +574,19 @@ async def roast(interaction: discord.Interaction, user: discord.Member):
 # --- LOAD COGS ---
 async def load_cogs():
     await bot.load_extension("cogs.moderation")
+
 # --- START BOT ---
 if __name__ == "__main__":
     keep_alive()
     token = os.getenv("DISCORD_TOKEN")
+
     if token:
-        bot.run(token)
+        import asyncio
+
+        async def main():
+            await load_cogs()
+            await bot.start(token)
+
+        asyncio.run(main())
     else:
         print("DISCORD_TOKEN not set!")
