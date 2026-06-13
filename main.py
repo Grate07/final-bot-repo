@@ -491,15 +491,23 @@ async def rank(interaction: discord.Interaction, member: discord.Member = None):
     xp = user_data["xp"]
 
     current_level_xp = sum([get_xp_for_level(i) for i in range(level)])
-    next_level_xp = get_xp_for_level(level)
-    progress = xp - current_level_xp
+next_level_xp = get_xp_for_level(level)
+progress = xp - current_level_xp
 
-        embed = discord.Embed(title=f"{member.display_name}'s Rank", color=discord.Color.blurple())
+        embed = discord.Embed(
+        title=f"{member.display_name}'s Rank",
+        color=discord.Color.blurple()
+    )
     embed.set_thumbnail(url=member.display_avatar.url)
     embed.add_field(name="Level", value=f"`{level}`", inline=True)
     embed.add_field(name="XP", value=f"`{xp}`", inline=True)
-    embed.add_field(name="Progress", value=f"`{progress}/{next_level_xp}`", inline=True)
-        await interaction.response.send_message(embed=embed)
+    embed.add_field(
+        name="Progress",
+        value=f"`{progress}/{next_level_xp}`",
+        inline=True
+    )
+
+    await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="leaderboard", description="Show the server XP leaderboard")
 async def leaderboard(interaction: discord.Interaction):
