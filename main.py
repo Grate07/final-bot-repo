@@ -495,7 +495,7 @@ async def roast(interaction: discord.Interaction, user: discord.Member):
            chat_completion = groq_client.chat.completions.create(
                messages=[
                    {"role": "system" , "content": "You are RUNCANDELS AI. ROAST the user savagely but keep it playful, no slurs or actual hate. Max 2 sentences. Use emoji."},
-                    {"roles": "user", "content": f"Roast this person: {user.display_name}"}
+                    {"role": "user", "content": f"Roast this person: {user.display_name}"}
                 ],
                 model="llama-3.1-8b instant",
                 max tokens=100
