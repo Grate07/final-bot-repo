@@ -494,5 +494,136 @@ async def rewards(interaction: discord.Interaction):
 async def roast(interaction: discord.Interaction, user: discord.Member):
     await interaction.response.defer()
 
-    if user.id == interaction.user.id:
-       
+        if user.id == interaction.user.id:
+        await interaction.followup.send("You can't roast yourself 💀")
+        return
+
+    if not groq_client:
+        await interaction.followup.send("AI is not set up.")
+        return
+
+    try:
+        chat_completion = groq_client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": "You are RUNCANDELS AI. Roast the user savagely but keep it playful, no slurs or actual hate. Max 2 sentences. Use emojis."},
+                {"role": "user", "content": f"Roast this person: {user.display_name}"}
+            ],
+            model="llama-3.1-8b-instant",
+            max_tokens=100
+        )
+        roast_text = chat_completion.choices[0].message.content
+        await interaction.followup.send(f"{user.mention} {roast_text}")
+    except Exception as e:
+        await interaction.followup.send("Roast machine broke 💀")
+
+@bot.tree.command(name="imagine", description="Generate an AI image with Stable Diffusion")
+@app_commands.describe(prompt="What to generate")
+@commands.cooldown(1, 30, commands.BucketType.user)
+async def imagine_slash(interaction: discord.Interaction, prompt: str):
+    # Channel lock
+    if interaction.channel.id!= 1514982328584241316:
+        await interaction.response.send_message("Use `/imagine` in <#1514982328584241316> only.", ephemeral=True)
+        return
+
+    if not HF_TOKEN:
+        await interaction.response.send_message("Image gen not set up. Owner needs to add HF_TOKEN.", ephemeral=True)
+        return
+
+    await interaction.response.defer()
+
+    try:
+        headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+        payload = {"inputs": prompt}
+
+        # FIXED: Use requests instead of aiohttp for Render DNS compatibility
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: requests.post(
+                "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0",
+                headers=headers,
+                json=payload,
+                timeout=60
+            )
+        )
+
+        if response.status_code!= 200:
+            await interaction.followup.send(f"HF Error {response.status_code}: Model might be loading. Try again in 20s.")
+            return
+
+        img_bytes = response.content
+
+        file = discord.File(io.BytesIO(img_bytes), filename="generated.png")
+        embed = discord.Embed(title="🎨 Generated Image", description=f"Prompt: `{prompt}`", color=0x5865F2)
+        embed.set_image(url="attachment://generated.png")
+        embed.set_footer(text=f"Requested by {interaction.user.display_name}")
+        await interaction.followup.send(embed=embed, file=file)
+
+    except requests.exceptions.Timeout:
+        await interaction.followup.send("Took too long - HF is probably cold starting. Try again.")
+    except Exception as e:
+        await interaction.followup.send(f"Imagine error: {e}")
+
+@bot.command(name="imagine", description="Generate an AI image")
+@commands.cooldown(1, 30, commands.BucketType.user)
+async def imagine_prefix(ctx, *, prompt: str = None):
+    # Channel lock
+    if ctx.channel.id!= 1514982328584241316:
+        await ctx.send("Use `!imagine` in <#1514982328584241316> only.", delete_after=10)
+        return
+
+    if not HF_TOKEN:
+        await ctx.send("Image gen not set up. Owner needs to add HF_TOKEN.")
+        return
+
+    if not prompt:
+        await ctx.send("Give me a prompt! Example: `!imagine a cyberpunk cat`")
+        return
+
+    msg = await ctx.send("🎨 Generating... this takes ~15s")
+
+    try:
+        headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+        payload = {"inputs": prompt}
+
+        # FIXED: Use requests instead of aiohttp for Render DNS compatibility
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: requests.post(
+                "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0",
+                headers=headers,
+                json=payload,
+                timeout=60
+            )
+        )
+
+        if response.status_code!= 200:
+            await msg.edit(content=f"HF Error {response.status_code}: Model might be loading. Try again in 20s.")
+            return
+
+        img_bytes = response.content
+
+        file = discord.File(io.BytesIO(img_bytes), filename="generated.png")
+        embed = discord.Embed(title="🎨 Generated Image", description=f"Prompt: `{prompt}`", color=0x5865F2)
+        embed.set_image(url="attachment://generated.png")
+        embed.set_footer(text=f"Requested by {ctx.author.display_name}")
+        await msg.delete()
+        await ctx.send(embed=embed, file=file)
+
+    except requests.exceptions.Timeout:
+        await msg.edit(content="Took too long - HF is probably cold starting. Try again.")
+    except Exception as e:
+        await msg.edit(content=f"Imagine error: {e}")
+
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandOnCooldown):
+        await ctx.send(f"Chill 😭 Wait {error.retry_after:.0f}s before next image.", delete_after=5)
+    elif isinstance(error, commands.CommandNotFound):
+        pass
+    else:
+        print(f"Prefix cmd error: {error}")
+
+keep_alive()
+bot.run(os.getenv("TOKEN"))
