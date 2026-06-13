@@ -496,9 +496,8 @@ async def rank(interaction: discord.Interaction, member: discord.Member = None):
 
     embed = discord.Embed(title=f"{member.display_name}'s Rank", color=discord.Color.blurple())
     embed.set_thumbnail(url=member.display_avatar.url)
-    embed.add_field(name="Level", value=f"`{level}`", inline=True)
-    embed.add_field(name="XP", value=f"`{xp}`", inline=True)
-            embed.add_field(name="XP", value=f"`{xp}`", inline=True)
+            embed.add_field(name="Level", value=f"`{level}`", inline=True)
+        embed.add_field(name="XP", value=f"`{xp}`", inline=True)
         embed.add_field(name="Progress", value=f"`{progress}/{next_level_xp}`", inline=True)
 
         await interaction.response.send_message(embed=embed)
