@@ -571,7 +571,9 @@ async def roast(interaction: discord.Interaction, user: discord.Member):
     except Exception as e:
         print(f"Roast Error: {e}")
         await interaction.followup.send("Couldn't roast them... they're too powerful 😔")
-
+# --- LOAD COGS ---
+async def load_cogs():
+    await bot.load_extension("cogs.moderation")
 # --- START BOT ---
 if __name__ == "__main__":
     keep_alive()
