@@ -609,3 +609,4 @@ if __name__ == "__main__":
         bot.run(token)
     else:
         print("DISCORD_TOKEN not set!")
+    
