@@ -488,13 +488,13 @@ async def rewards(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="roast", description="Get RUNCANDELS AI to roast someone")
+ @bot.tree.command(name="roast", description="Get RUNCANDELS AI to roast someone")
 @app_commands.describe(user="Who to roast")
 @commands.cooldown(1, 30, commands.BucketType.user)
 async def roast(interaction: discord.Interaction, user: discord.Member):
     await interaction.response.defer()
 
-        if user.id == interaction.user.id:
+    if user.id == interaction.user.id:
         await interaction.followup.send("You can't roast yourself 💀")
         return
 
@@ -627,3 +627,4 @@ async def on_command_error(ctx, error):
 
 keep_alive()
 bot.run(os.getenv("TOKEN"))
+  
