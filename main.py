@@ -491,7 +491,7 @@ async def roast(interaction: discord.Interaction, user: discord.Member):
         await interaction.followup.send("AI is not set up.")
         return
 
-            try:
+           try:
             chat_completion = groq_client.chat.completions.create(
                 messages=[
                     {"role": "system", "content": "You are RUNCANDELS AI. Roast the user savagely but keep it playful, no slurs or actual hate. Max 2 sentences. Use emojis."},
@@ -503,4 +503,4 @@ async def roast(interaction: discord.Interaction, user: discord.Member):
             roast_text = chat_completion.choices[0].message.content
             await interaction.followup.send(f"{user.mention} {roast_text}")
         except Exception as e:
-            await interaction.followup.send("Roast machine broke 💀")
+            await interaction.followup.send("Roast machine broke 💀")         
