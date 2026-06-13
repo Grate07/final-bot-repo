@@ -245,7 +245,7 @@ async def before_update_stats():
 @bot.event
 async def on_ready():
     global http_session
-    http_session = aiohttp.ClientSession(connector=connector)
+    http_session = aiohttp.ClientSession()
 
     bot.add_view(TicketPanel())
     bot.add_view(CloseTicket())
