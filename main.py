@@ -80,9 +80,10 @@ def save_config(data):
 def get_guild_config(guild_id):
     config = load_config()
     return config.get(str(guild_id), {
-        "welcome_channel": None,
-        "auto_role": None
-    })
+    "welcome_channel": None,
+    "auto_role": None,
+    "modlog_channel": None
+})
 
 def set_guild_config(guild_id, key, value):
     config = load_config()
