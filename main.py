@@ -390,7 +390,7 @@ async def imagine(ctx, *, prompt: str = None):
 
     msg = await ctx.reply(f"🎨 Drawing: `{prompt}`\nTakes 15-40s on Render...")
 
-    API_URL = "https://router.huggingface.co/hf-inference/models/stabilityai/stable-diffusion-xl-base-1.0"
+    API_URL = "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell"
     headers = {"Authorization": f"Bearer {HF_TOKEN}"} if HF_TOKEN else {}
 
     try:
