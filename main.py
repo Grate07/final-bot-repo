@@ -15,6 +15,7 @@ import requests
 import time
 import asyncio
 import aiohttp
+import socket
 gc.set_threshold(700, 10, 10)
 
 # --- KEEP RENDER ALIVE ---
@@ -62,6 +63,10 @@ BANNED_WORDS = ["badword1", "slur2"]
 INVITE_WHITELIST = []
 
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+
+# --- RENDER FIX: Force IPv4 for Hugging Face ---
+connector = aiohttp.TCPConnector(family=socket.AF_INET)
+http_session = None
 
 # --- CONFIG HANDLERS ---
 def load_config():
@@ -241,6 +246,9 @@ async def before_update_stats():
 # --- BOT EVENTS ---
 @bot.event
 async def on_ready():
+    global http_session
+    http_session = aiohttp.ClientSession(connector=connector)
+
     bot.add_view(TicketPanel())
     bot.add_view(CloseTicket())
     update_stats.start()
@@ -372,7 +380,7 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-# --- IMAGINE COMMAND - HUGGING FACE ---
+# --- IMAGINE COMMAND - HUGGING FACE FIXED FOR RENDER ---
 @bot.command(name="imagine")
 @commands.cooldown(1, 30, commands.BucketType.user)
 async def imagine(ctx, *, prompt: str = None):
@@ -382,21 +390,22 @@ async def imagine(ctx, *, prompt: str = None):
     if not prompt:
         return await ctx.reply("What should I imagine? `!imagine a cyberpunk penguin`")
 
-    msg = await ctx.reply(f"🎨 Asking Hugging Face to draw: `{prompt}`\nCan take 20-60s if servers are sleeping...")
+    msg = await ctx.reply(f"🎨 Drawing: `{prompt}`\nTakes 15-40s on Render...")
+
+    API_URL = "https://router.huggingface.co/hf-inference/models/stabilityai/stable-diffusion-xl-base-1.0"
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"} if HF_TOKEN else {}
+
     try:
-        API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
-        headers = {"Authorization": f"Bearer {HF_TOKEN}"} if HF_TOKEN else {}
+        async with http_session.post(API_URL, headers=headers, json={"inputs": prompt}, timeout=60) as response:
+            if response.status == 503:
+                return await msg.edit(content="HF models are loading. Try again in 20s.")
+            if response.status == 429:
+                return await msg.edit(content="Rate limited. Add a HF_TOKEN in Render env vars to fix.")
+            if response.status!= 200:
+                error_text = await response.text()
+                return await msg.edit(content=f"HF error {response.status}: {error_text[:500]}")
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(API_URL, headers=headers, json={"inputs": prompt}) as response:
-                if response.status == 503:
-                    return await msg.edit(content="HF models are loading. Try again in 20s.")
-                if response.status == 429:
-                    return await msg.edit(content="Rate limited. Get a free HF_TOKEN to fix this.")
-                if response.status!= 200:
-                    return await msg.edit(content=f"HF error {response.status}. Try a different prompt.")
-
-                image_bytes = await response.read()
+            image_bytes = await response.read()
 
         file = discord.File(io.BytesIO(image_bytes), filename="imagine.png")
         await msg.delete()
@@ -406,8 +415,10 @@ async def imagine(ctx, *, prompt: str = None):
         embed.set_footer(text=f"Requested by {ctx.author.display_name}")
         await ctx.send(embed=embed, file=file)
 
+    except asyncio.TimeoutError:
+        await msg.edit(content="Render timed out. HF is slow rn. Try again or use a shorter prompt.")
     except Exception as e:
-        await msg.edit(content=f"Failed: `{e}`. HF might be down.")
+        await msg.edit(content=f"Failed: `{str(e)[:200]}`")
         print(f"Imagine Error: {e}")
 
 @imagine.error
@@ -487,35 +498,35 @@ async def rank(interaction: discord.Interaction, member: discord.Member = None):
     embed.set_thumbnail(url=member.display_avatar.url)
     embed.add_field(name="Level", value=f"`{level}`", inline=True)
     embed.add_field(name="XP", value=f"`{xp}`", inline=True)
-    embed.add_field(name="Progress", value=f"`{progress}/{next_level_xp}`", inline=True)
+            embed.add_field(name="XP", value=f"`{xp}`", inline=True)
+        embed.add_field(name="Progress", value=f"`{progress}/{next_level_xp}`", inline=True)
 
-    await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="leaderboard", description="Show the server XP leaderboard")
 async def leaderboard(interaction: discord.Interaction):
     levels = load_levels()
     guild_id = str(interaction.guild.id)
 
-    if guild_id not in levels or not levels[guild_id]:
-        await interaction.response.send_message("No one has earned XP yet!", ephemeral=True)
+    if guild_id not in levels:
+        await interaction.response.send_message("No one has XP yet!", ephemeral=True)
         return
 
-    sorted_users = sorted(levels[guild_id].items(), key=lambda x: x[1]["xp"], reverse=True)[:10]
-
-    embed = discord.Embed(title="🏆 RUNCANDELS Leaderboard", color=discord.Color.gold())
+    sorted_users = sorted(levels[guild_id].items(), key=lambda x: x[1]['xp'], reverse=True)[:10]
 
     desc = ""
     for i, (user_id, data) in enumerate(sorted_users, 1):
         user = interaction.guild.get_member(int(user_id))
-        if user:
-            desc += f"**{i}.** {user.mention} - Level `{data['level']}` | `{data['xp']}` XP\n"
+        name = user.display_name if user else f"User {user_id}"
+        desc += f"**{i}.** {name} - Level {data['level']} ({data['xp']} XP)\n"
 
-    embed.description = desc if desc else "No data"
+    embed = discord.Embed(title="🏆 RUNCANDELS Leaderboard", description=desc, color=discord.Color.gold())
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="rewards", description="Show all level role rewards")
-async def rewards(interaction: discord.Interaction):
-    embed = discord.Embed(title="🏅 Level Rewards", description="Reach these levels to unlock roles:", color=discord.Color.blue())
+@bot.tree.command(name="levelrewards", description="Show level role rewards")
+async def levelrewards(interaction: discord.Interaction):
+    embed = discord.Embed(title="🎁 Level Rewards", description="Reach these levels to unlock roles:", color=discord.Color.green())
+
     for level, role_id in sorted(LEVEL_ROLES.items()):
         role = interaction.guild.get_role(role_id)
         if role:
@@ -523,25 +534,22 @@ async def rewards(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="roast", description="Get RUNCANDELS AI to roast someone")
-@app_commands.describe(user="Who to roast")
+@bot.tree.command(name="roast", description="Roast a user")
 async def roast(interaction: discord.Interaction, user: discord.Member):
-    await interaction.response.defer()
-
-    if user.id == interaction.user.id:
-        await interaction.followup.send("You can't roast yourself 💀")
-        return
+    if user == bot.user:
+        return await interaction.response.send_message("You can't roast me 💀", ephemeral=True)
 
     if not groq_client:
-        await interaction.followup.send("AI is not set up.")
-        return
+        return await interaction.response.send_message("Roast AI is offline", ephemeral=True)
+
+    await interaction.response.defer()
 
     try:
         chat_completion = groq_client.chat.completions.create(
             messages=[
                 {
                     "role": "system",
-                    "content": "You are RUNCANDELS AI. Roast the user savagely but keep it playful, no slurs or hate. Maximum 2 sentences. Use emojis."
+                    "content": "You are RUNCANDELS AI. Roast the user savagely but keep it playful. No slurs or hate. Maximum 2 sentences. Use emojis."
                 },
                 {
                     "role": "user",
@@ -554,7 +562,12 @@ async def roast(interaction: discord.Interaction, user: discord.Member):
         await interaction.followup.send(f"{user.mention} {chat_completion.choices[0].message.content}")
     except Exception as e:
         print(f"Roast Error: {e}")
-        await interaction.followup.send("Couldn't roast them, they're too powerful 😭")
+        await interaction.followup.send("Couldn't roast them... they're too powerful 😔")
+
+@bot.event
+async def on_disconnect():
+    if http_session:
+        await http_session.close()
 
 # --- START BOT ---
 if __name__ == "__main__":
