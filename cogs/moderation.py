@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from discord import Member
+from discord import Member, app_commands
 from datetime import timedelta
 
 class Moderation(commands.Cog):
@@ -20,6 +20,23 @@ async def send_modlog(self, guild, embed):
 
     if channel:
         await channel.send(embed=embed)
+
+@app_commands.command(
+    name="setmodlogs",
+    description="Set the moderation logs channel"
+)
+@app_commands.checks.has_permissions(administrator=True)
+async def setmodlogs(
+    self,
+    interaction: discord.Interaction,
+    channel: discord.TextChannel
+):
+    self.bot.modlogs[interaction.guild.id] = channel.id
+
+    await interaction.response.send_message(
+        f"✅ Mod logs channel set to {channel.mention}",
+        ephemeral=True
+    )
 
 @commands.Cog.listener()
 async def on_message_delete(self, message):
@@ -117,10 +134,6 @@ async def purge(self, ctx, amount: int):
 async def kick(self, ctx, member: Member, *, reason="No reason provided"):
     await member.kick(reason=reason)
 
-    await ctx.send(
-        f"🔨 {member.mention} was kicked.\nReason: {reason}"
-    )
-
     embed = discord.Embed(
         title="🔨 Member Kicked",
         color=discord.Color.red()
@@ -131,15 +144,12 @@ async def kick(self, ctx, member: Member, *, reason="No reason provided"):
     embed.add_field(name="Reason", value=reason, inline=False)
 
     await self.send_modlog(ctx.guild, embed)
+    await ctx.send(f"🔨 {member.mention} was kicked.")
 
 @commands.command()
 @commands.has_permissions(ban_members=True)
 async def ban(self, ctx, member: Member, *, reason="No reason provided"):
     await member.ban(reason=reason)
-
-    await ctx.send(
-        f"🔨 {member.mention} was banned.\nReason: {reason}"
-    )
 
     embed = discord.Embed(
         title="🔨 Member Banned",
@@ -151,6 +161,7 @@ async def ban(self, ctx, member: Member, *, reason="No reason provided"):
     embed.add_field(name="Reason", value=reason, inline=False)
 
     await self.send_modlog(ctx.guild, embed)
+    await ctx.send(f"🔨 {member.mention} was banned.")
 
 @commands.command()
 @commands.has_permissions(ban_members=True)
@@ -158,8 +169,6 @@ async def unban(self, ctx, user_id: int):
     user = await self.bot.fetch_user(user_id)
 
     await ctx.guild.unban(user)
-
-    await ctx.send(f"✅ Unbanned {user}")
 
     embed = discord.Embed(
         title="✅ Member Unbanned",
@@ -170,6 +179,7 @@ async def unban(self, ctx, user_id: int):
     embed.add_field(name="Moderator", value=ctx.author.mention, inline=False)
 
     await self.send_modlog(ctx.guild, embed)
+    await ctx.send(f"✅ Unbanned {user}")
 
 @commands.command()
 @commands.has_permissions(moderate_members=True)
@@ -177,10 +187,6 @@ async def timeout(self, ctx, member: Member, minutes: int, *, reason="No reason 
     duration = timedelta(minutes=minutes)
 
     await member.timeout(duration, reason=reason)
-
-    await ctx.send(
-        f"⏳ {member.mention} timed out for {minutes} minute(s).\nReason: {reason}"
-    )
 
     embed = discord.Embed(
         title="⏳ Member Timed Out",
@@ -194,14 +200,14 @@ async def timeout(self, ctx, member: Member, minutes: int, *, reason="No reason 
 
     await self.send_modlog(ctx.guild, embed)
 
+    await ctx.send(
+        f"⏳ {member.mention} timed out for {minutes} minute(s)."
+    )
+
 @commands.command()
 @commands.has_permissions(moderate_members=True)
 async def untimeout(self, ctx, member: Member):
     await member.timeout(None)
-
-    await ctx.send(
-        f"✅ Removed timeout from {member.mention}"
-    )
 
     embed = discord.Embed(
         title="✅ Timeout Removed",
@@ -212,14 +218,11 @@ async def untimeout(self, ctx, member: Member):
     embed.add_field(name="Moderator", value=ctx.author.mention, inline=False)
 
     await self.send_modlog(ctx.guild, embed)
+    await ctx.send(f"✅ Removed timeout from {member.mention}")
 
 @commands.command()
 @commands.has_permissions(moderate_members=True)
 async def warn(self, ctx, member: Member, *, reason="No reason provided"):
-    await ctx.send(
-        f"⚠️ {member.mention} has been warned.\nReason: {reason}"
-    )
-
     embed = discord.Embed(
         title="⚠️ Member Warned",
         color=discord.Color.yellow()
@@ -231,13 +234,8 @@ async def warn(self, ctx, member: Member, *, reason="No reason provided"):
 
     await self.send_modlog(ctx.guild, embed)
 
-@commands.command()
-@commands.has_permissions(administrator=True)
-async def setmodlog(self, ctx, channel: discord.TextChannel):
-    self.bot.modlogs[ctx.guild.id] = channel.id
-
     await ctx.send(
-        f"✅ Mod log channel set to {channel.mention}"
+        f"⚠️ {member.mention} has been warned.\nReason: {reason}"
     )
 
 async def setup(bot):
