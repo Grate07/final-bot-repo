@@ -66,3 +66,5 @@ class Moderation(commands.Cog):
         await ctx.send(
             f"✅ Mod log channel set to {channel.mention}"
         )
+async def setup(bot):
+    await bot.add_cog(Moderation(bot))
