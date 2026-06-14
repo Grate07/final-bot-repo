@@ -49,23 +49,18 @@ class Moderation(commands.Cog):
         await ctx.send(f"✅ Removed timeout from {member.mention}")
 
     @commands.command()
-@commands.has_permissions(moderate_members=True)
-async def warn(self, ctx, member: Member, *, reason="No reason provided"):
-    await ctx.send(
-        f"⚠️ {member.mention} has been warned.\nReason: {reason}"
-    )
-    
+    @commands.has_permissions(moderate_members=True)
+    async def warn(self, ctx, member: Member, *, reason="No reason provided"):
+        await ctx.send(
+            f"⚠️ {member.mention} has been warned.\nReason: {reason}"
+        )
+
     @commands.command()
-@commands.has_permissions(administrator=True)
-async def setmodlog(self, ctx, channel: discord.TextChannel):
-    if not hasattr(self.bot, "modlogs"):
-        self.bot.modlogs = {}
-
-    self.bot.modlogs[ctx.guild.id] = channel.id
-
-    await ctx.send(
-        f"✅ Mod log channel set to {channel.mention}"
-    )
+    @commands.has_permissions(administrator=True)
+    async def setmodlog(self, ctx, channel: discord.TextChannel):
+        await ctx.send(
+            f"✅ Mod log channel set to {channel.mention}"
+        )
 
 async def setup(bot):
     await bot.add_cog(Moderation(bot))
