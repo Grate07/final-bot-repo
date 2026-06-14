@@ -48,5 +48,12 @@ class Moderation(commands.Cog):
         await member.timeout(None)
         await ctx.send(f"✅ Removed timeout from {member.mention}")
 
+    @commands.command()
+    @commands.has_permissions(administrator=True)
+    async def setmodlog(self, ctx, channel: discord.TextChannel):
+        await ctx.send(
+            f"⚠️ setmodlog isn't wired to config yet. Selected: {channel.mention}"
+        )
+
 async def setup(bot):
     await bot.add_cog(Moderation(bot))
