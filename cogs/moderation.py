@@ -56,8 +56,8 @@ class Moderation(commands.Cog):
         )
 
     @commands.command()
-@commands.has_permissions(administrator=True)
-async def setmodlog(self, ctx, channel: discord.TextChannel):
+    @commands.has_permissions(administrator=True)
+    async def setmodlog(self, ctx, channel: discord.TextChannel):
         if not hasattr(self.bot, "modlogs"):
             self.bot.modlogs = {}
 
