@@ -4,8 +4,8 @@ from discord import Member, app_commands
 from datetime import timedelta
 
 class Moderation(commands.Cog):
-def init(self, bot):
-self.bot = bot
+    def __init__(self, bot):
+        self.bot = bot
 
     if not hasattr(bot, "modlogs"):
         bot.modlogs = {}
