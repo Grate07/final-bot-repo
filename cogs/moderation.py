@@ -58,14 +58,11 @@ class Moderation(commands.Cog):
     @commands.command()
 @commands.has_permissions(administrator=True)
 async def setmodlog(self, ctx, channel: discord.TextChannel):
+        if not hasattr(self.bot, "modlogs"):
+            self.bot.modlogs = {}
 
-    if not hasattr(self.bot, "modlogs"):
-        self.bot.modlogs = {}
+        self.bot.modlogs[ctx.guild.id] = channel.id
 
-    self.bot.modlogs[ctx.guild.id] = channel.id
-
-    await ctx.send(
-        f"✅ Mod log channel set to {channel.mention}"
-    )
-async def setup(bot):
-    await bot.add_cog(Moderation(bot))
+        await ctx.send(
+            f"✅ Mod log channel set to {channel.mention}"
+        )
