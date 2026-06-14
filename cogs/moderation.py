@@ -54,38 +54,6 @@ async def warn(self, ctx, member: Member, *, reason="No reason provided"):
     await ctx.send(
         f"⚠️ {member.mention} has been warned.\nReason: {reason}"
     )
-
-    if hasattr(self.bot, "modlogs"):
-        channel_id = self.bot.modlogs.get(ctx.guild.id)
-
-        if channel_id:
-            log_channel = self.bot.get_channel(channel_id)
-
-            if log_channel:
-                embed = discord.Embed(
-                    title="⚠️ Member Warned",
-                    color=discord.Color.orange()
-                )
-
-                embed.add_field(
-                    name="User",
-                    value=f"{member} ({member.id})",
-                    inline=False
-                )
-
-                embed.add_field(
-                    name="Moderator",
-                    value=ctx.author.mention,
-                    inline=False
-                )
-
-                embed.add_field(
-                    name="Reason",
-                    value=reason,
-                    inline=False
-                )
-
-                await log_channel.send(embed=embed)
     
     @commands.command()
 @commands.has_permissions(administrator=True)
