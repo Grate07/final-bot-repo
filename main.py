@@ -51,6 +51,7 @@ def save_config(d):
     with open(CONFIG_FILE, 'w') as f: json.dump(d, f, indent=4)
 def set_guild_config(gid, k, v):
     c = load_config(); c[k]=v; save_config(c)
+
 def is_ticket_staff():
     async def predicate(interaction: discord.Interaction):
         if interaction.user.guild_permissions.administrator: return True
@@ -60,6 +61,7 @@ def is_ticket_staff():
         await interaction.response.send_message(view=view, ephemeral=True)
         return False
     return app_commands.check(predicate)
+
 def load_levels():
     if os.path.exists(LEVELS_FILE):
         try:
@@ -74,6 +76,7 @@ def get_level_from_xp(xp):
     while xp>=get_xp_for_level(l): xp-=get_xp_for_level(l); l+=1
     return l
 
+# --- TICKET SYSTEM V2 - ONLY ISSUE ---
 class CloseBtn(discord.ui.Button):
     def __init__(self):
         super().__init__(label="Close", style=discord.ButtonStyle.danger, emoji="🔒", custom_id="runcandels_close")
@@ -93,7 +96,7 @@ class CloseBtn(discord.ui.Button):
                         cont.add_item(discord.ui.TextDisplay(f"### RUNCANDELS Ticket Closed\n**Channel:** {interaction.channel.name}\n**Closed by:** {interaction.user.mention}"))
                         v.add_item(cont)
                         await ch.send(view=v, file=file)
-                except Exception as e: print(e)
+                except Exception as e: print(f"Transcript error: {e}")
         await interaction.channel.send("🔒 Closing in 3s...")
         await asyncio.sleep(3)
         try: await interaction.channel.delete(reason=f"Closed by {interaction.user}")
@@ -103,7 +106,7 @@ class TicketModal(discord.ui.Modal):
     def __init__(self, ticket_type: str):
         super().__init__(title=f"{ticket_type} Ticket")
         self.ticket_type = ticket_type
-        self.issue = discord.ui.TextInput(label="Issue", placeholder="Describe your issue / report...", style=discord.TextStyle.paragraph, required=True, max_length=1000)
+        self.issue = discord.ui.TextInput(label="Issue", placeholder="Describe your issue in detail...", style=discord.TextStyle.paragraph, required=True, max_length=1000)
         self.add_item(self.issue)
     async def on_submit(self, interaction: discord.Interaction):
         await create_ticket_channel(interaction, self.ticket_type, self.issue.value)
@@ -197,9 +200,16 @@ async def on_ready():
     bot.add_view(CloseView())
     update_stats.start()
     for guild in bot.guilds:
-        try: await bot.tree.sync(guild=guild)
-        except Exception as e: print(e)
-    print(f"Logged in as {bot.user} | RUNCANDELS V2")
+        try:
+            bot.tree.copy_global_to(guild=guild)
+            await bot.tree.sync(guild=guild)
+            print(f"Synced to {guild.name}")
+        except Exception as e: print(f"Sync error {e}")
+    try:
+        await bot.tree.sync()
+        print("Global sync done")
+    except Exception as e: print(f"Global sync error {e}")
+    print(f"Logged in as {bot.user} | RUNCANDELS V2 READY")
 
 @bot.event
 async def on_member_join(member):
@@ -231,14 +241,31 @@ async def on_message(message):
                 try: await message.channel.send(view=v, delete_after=10)
                 except: pass
             save_levels(levels)
+    if groq_client and (bot.user in message.mentions):
+        if not message.content.startswith('!'):
+            async with message.channel.typing():
+                try:
+                    content=message.content.replace(f'<@{bot.user.id}>','').strip()
+                    if content:
+                        comp=groq_client.chat.completions.create(messages=[{"role":"system","content":"You are RUNCANDELS AI, friendly, casual."},{"role":"user","content":content}], model="llama-3.1-8b-instant", max_tokens=400)
+                        await message.reply(comp.choices[0].message.content[:2000])
+                except: pass
     await bot.process_commands(message)
+
+# --- SYNC FIX COMMANDS ---
+@bot.command(name="sync")
+@commands.has_permissions(administrator=True)
+async def sync_cmd(ctx):
+    bot.tree.copy_global_to(guild=ctx.guild)
+    synced = await bot.tree.sync(guild=ctx.guild)
+    await ctx.send(f"✅ Synced {len(synced)} commands to this server: {', '.join([c.name for c in synced])}")
+    await bot.tree.sync()
 
 async def send_panel(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     await interaction.channel.send(view=TicketPanelView())
     await interaction.followup.send("✅ RUNCANDELS panel sent!", ephemeral=True)
 
-# FIXED - NO DOUBLE DECORATOR
 @bot.tree.command(name="ticket-panel", description="Post RUNCANDELS ticket panel")
 @is_ticket_staff()
 async def ticket_panel(interaction: discord.Interaction):
@@ -260,17 +287,14 @@ async def set_transcript(interaction: discord.Interaction, channel: discord.Text
 @is_ticket_staff()
 @app_commands.choices(ticket_type=[app_commands.Choice(name="Queries", value="queries"), app_commands.Choice(name="Report", value="report")])
 async def set_ticket_category(interaction: discord.Interaction, ticket_type: app_commands.Choice[str], category: discord.CategoryChannel):
-    try:
-        await interaction.response.defer(ephemeral=True)
-        c=load_config()
-        if "ticket_categories" not in c: c["ticket_categories"]={}
-        real = ticket_type.value
-        c["ticket_categories"][real]=category.id
-        save_config(c)
-        v=discord.ui.LayoutView(); v.add_item(discord.ui.Container(accent_colour=ACCENT, children=[discord.ui.TextDisplay(f"✅ **{real.capitalize()}** → **{category.name}**")]))
-        await interaction.followup.send(view=v, ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"❌ {e}", ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
+    c=load_config()
+    if "ticket_categories" not in c: c["ticket_categories"]={}
+    real = ticket_type.value
+    c["ticket_categories"][real]=category.id
+    save_config(c)
+    v=discord.ui.LayoutView(); v.add_item(discord.ui.Container(accent_colour=ACCENT, children=[discord.ui.TextDisplay(f"✅ **{real.capitalize()}** → **{category.name}**")]))
+    await interaction.followup.send(view=v, ephemeral=True)
 
 @bot.tree.command(name="welcomeset", description="Set welcome channel")
 @app_commands.checks.has_permissions(administrator=True)
@@ -285,7 +309,7 @@ async def rank(interaction: discord.Interaction, member: discord.Member=None):
     levels=load_levels(); gid=str(interaction.guild.id); uid=str(member.id)
     if gid not in levels or uid not in levels[gid]: return await interaction.response.send_message("No XP", ephemeral=True)
     data=levels[gid][uid]
-    v=discord.ui.LayoutView(); c=discord.ui.Container(accent_colour=ACCENT); c.add_item(discord.ui.TextDisplay(f"## {member.display_name}'s Rank\nLevel {data['level']} | XP {data['xp']}")); v.add_item(c)
+    v=discord.ui.LayoutView(); cont=discord.ui.Container(accent_colour=ACCENT); cont.add_item(discord.ui.TextDisplay(f"## {member.display_name}'s Rank\nLevel {data['level']} | XP {data['xp']}")); v.add_item(cont)
     await interaction.response.send_message(view=v)
 
 @bot.tree.command(name="leaderboard", description="Show leaderboard")
@@ -297,9 +321,18 @@ async def leaderboard(interaction: discord.Interaction):
     v=discord.ui.LayoutView(); c=discord.ui.Container(accent_colour=ACCENT); c.add_item(discord.ui.TextDisplay(f"### 🏆 RUNCANDELS Leaderboard\n{desc}")); v.add_item(c)
     await interaction.response.send_message(view=v)
 
+@bot.tree.command(name="force-sync", description="Force sync slash commands (Admin only)")
+@app_commands.checks.has_permissions(administrator=True)
+async def force_sync(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    bot.tree.copy_global_to(guild=interaction.guild)
+    synced = await bot.tree.sync(guild=interaction.guild)
+    await bot.tree.sync()
+    await interaction.followup.send(f"✅ Force synced {len(synced)} commands: {', '.join([c.name for c in synced])}", ephemeral=True)
+
 async def load_cogs():
     try: await bot.load_extension("cogs.moderation")
-    except Exception as e: print(e)
+    except Exception as e: print(f"Cog load error: {e}")
 
 if __name__=="__main__":
     keep_alive()
