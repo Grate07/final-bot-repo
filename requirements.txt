@@ -3,3 +3,4 @@ chat-exporter
 aiohttp
 Flask
 groq
+requests
