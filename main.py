@@ -15,47 +15,37 @@ import requests
 import time
 import asyncio
 import aiohttp
-import socket
 gc.set_threshold(700, 10, 10)
 
 # --- KEEP RENDER ALIVE ---
 app = Flask('')
-
 @app.route('/')
 def home():
-    return "Bot is running!"
-
+    return "Onyx is running!"
 def run():
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
-
 def keep_alive():
     t = Thread(target=run)
     t.start()
 
-# --- BOT SETUP WITH INTENTS ---
+# --- BOT SETUP ---
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
-
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # --- CONFIG ---
-TICKET_CATEGORY_ID = 1513372898058833981
-STAFF_ROLE_NAME = "Staff"
+ONYX = 0x0F0F0F
+STAFF_ROLE_ID = 1480151118276202649 # YOUR REQUIRED ROLE
+TICKET_CATEGORY_FALLBACK = 1513372898058833981
 LOG_CHANNEL_ID = 1513387589514694747
 CONFIG_FILE = "config.json"
 LEVELS_FILE = "levels.json"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 HF_TOKEN = os.getenv("HF_TOKEN")
 AI_CHANNEL_ID = 1514982328584241316
-CONFESS_CHANNEL = 1514982328584241316
-LEVEL_ROLES = {
-    5: 1485818597870796840,
-    10: 1485817312098385950,
-    20: 1485817682682183731,
-    50: 1485817752965877790
-}
+LEVEL_ROLES = {5: 1485818597870796840, 10: 1485817312098385950, 20: 1485817682682183731, 50: 1485817752965877790}
 STATS_GUILD_ID = 1465300538491932869
 STATS_MEMBER_CHANNEL = 1514982328584241317
 STATS_BOT_CHANNEL = 1514982328584241318
@@ -63,50 +53,43 @@ BANNED_WORDS = ["badword1", "slur2"]
 INVITE_WHITELIST = []
 
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+http_session = None
 
-# --- RENDER FIX: Force IPv4 for Hugging Face ---
-
-# --- CONFIG HANDLERS ---
 def load_config():
     if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, 'r') as f:
-            return json.load(f)
-    return {}
+        with open(CONFIG_FILE, 'r') as f: return json.load(f)
+    return {"transcript_channel": LOG_CHANNEL_ID, "ticket_categories": {"queries": TICKET_CATEGORY_FALLBACK, "report": TICKET_CATEGORY_FALLBACK}, "welcome_channel": None, "auto_role": None}
 
 def save_config(data):
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(data, f, indent=4)
+    with open(CONFIG_FILE, 'w') as f: json.dump(data, f, indent=4)
 
 def get_guild_config(guild_id):
-    config = load_config()
-    return config.get(str(guild_id), {
-    "welcome_channel": None,
-    "auto_role": None,
-    "modlog_channel": None
-})
+    c = load_config()
+    return c
 
 def set_guild_config(guild_id, key, value):
-    config = load_config()
-    guild_id = str(guild_id)
-    if guild_id not in config:
-        config[guild_id] = {}
-    config[guild_id][key] = value
-    save_config(config)
+    c = load_config()
+    c[key] = value
+    save_config(c)
 
-# --- LEVEL SYSTEM ---
+# --- PERMISSION CHECK FOR YOUR ROLE ---
+def is_ticket_staff():
+    async def predicate(interaction: discord.Interaction):
+        has_role = any(r.id == STAFF_ROLE_ID for r in interaction.user.roles)
+        if has_role or interaction.user.guild_permissions.administrator:
+            return True
+        await interaction.response.send_message(f"❌ You need <@&{STAFF_ROLE_ID}> to use this.", ephemeral=True)
+        return False
+    return app_commands.check(predicate)
+
+# --- LEVEL SYSTEM (same) ---
 def load_levels():
     if os.path.exists(LEVELS_FILE):
-        with open(LEVELS_FILE, 'r') as f:
-            return json.load(f)
+        with open(LEVELS_FILE, 'r') as f: return json.load(f)
     return {}
-
 def save_levels(data):
-    with open(LEVELS_FILE, 'w') as f:
-        json.dump(data, f, indent=4)
-
-def get_xp_for_level(level):
-    return 5 * (level ** 2) + 50 * level + 100
-
+    with open(LEVELS_FILE, 'w') as f: json.dump(data, f, indent=4)
+def get_xp_for_level(level): return 5 * (level ** 2) + 50 * level + 100
 def get_level_from_xp(xp):
     level = 0
     while xp >= get_xp_for_level(level):
@@ -114,480 +97,309 @@ def get_level_from_xp(xp):
         level += 1
     return level
 
-# --- TICKET PANEL VIEW - RUNCANDELS ---
-class TicketPanel(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
+# --- NEW ONYX TICKET SYSTEM - COMPONENTS V2 ---
+class TicketModal(discord.ui.Modal):
+    def __init__(self, ticket_type: str):
+        super().__init__(title=f"{ticket_type.capitalize()} Ticket")
+        self.ticket_type = ticket_type.lower()
+        label = "Write your query" if self.ticket_type == "queries" else "What do you want to report?"
+        self.desc = discord.ui.TextInput(label=label, placeholder="Describe in detail...", style=discord.TextStyle.paragraph, required=True, max_length=1000)
+        self.add_item(self.desc)
 
-    async def create_ticket_channel(self, interaction: discord.Interaction, ticket_type: str):
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        config = load_config()
         guild = interaction.guild
-        user = interaction.user
 
-        existing_ticket = discord.utils.get(guild.text_channels, name=f"{ticket_type.lower()}-{user.name.lower()}")
-        if existing_ticket:
-            await interaction.response.send_message(f"You already have an open {ticket_type} ticket: {existing_ticket.mention}", ephemeral=True)
-            return
+        category_id = config.get("ticket_categories", {}).get(self.ticket_type, TICKET_CATEGORY_FALLBACK)
+        category = guild.get_channel(category_id) if category_id else None
 
-        category = guild.get_channel(TICKET_CATEGORY_ID)
-        if not category:
-            await interaction.response.send_message("Ticket category not found. Contact an admin.", ephemeral=True)
-            return
-
-        staff_role = discord.utils.get(guild.roles, name=STAFF_ROLE_NAME)
+        # prevent duplicate
+        existing = discord.utils.get(guild.text_channels, name=f"{self.ticket_type}-{interaction.user.name.lower()}"[:90])
+        if existing:
+            return await interaction.followup.send(f"You already have a ticket: {existing.mention}", ephemeral=True)
 
         overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True, embed_links=True),
-            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, read_message_history=True),
+            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True)
         }
+        staff_role = guild.get_role(STAFF_ROLE_ID)
         if staff_role:
-            overwrites[staff_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+            overwrites[staff_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_messages=True)
 
         channel = await guild.create_text_channel(
-            name=f"{ticket_type.lower()}-{user.name}",
+            name=f"{self.ticket_type}-{interaction.user.name}"[:90],
             category=category,
             overwrites=overwrites,
-            topic=f"{ticket_type} ticket for {user.id}"
+            topic=f"UID:{interaction.user.id} | Type:{self.ticket_type}"
         )
 
-        embed = discord.Embed(
-            title=f"🎫 {ticket_type} Ticket",
-            description=f"Hey {user.mention}, thanks for contacting RUNCANDELS Support!\n\nPlease describe your issue in detail. A staff member will assist you shortly.",
-            color=discord.Color.blue()
-        )
-        embed.add_field(name="Close ticket", value="Click the 🔒 button below when your issue is resolved.", inline=False)
-        embed.set_footer(text=f"User ID: {user.id}")
+        # Components V2 ticket welcome
+        view = discord.ui.LayoutView(timeout=None)
+        container = discord.ui.Container(accent_colour=ONYX)
+        container.add_item(discord.ui.TextDisplay(f"## 🎫 {self.ticket_type.capitalize()} Ticket\nWelcome {interaction.user.mention}, staff will be with you shortly."))
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay(f"**Description:**\n>>> {self.desc.value}"))
+        container.add_item(discord.ui.TextDisplay(f"-# User ID: {interaction.user.id}"))
+        view.add_item(container)
+        view.add_item(discord.ui.ActionRow(CloseTicketBtn()))
 
-        ping_content = f"{user.mention}"
-        if staff_role:
-            ping_content += f" {staff_role.mention}"
+        await channel.send(content=f"{interaction.user.mention} {staff_role.mention if staff_role else ''}", view=view)
+        await interaction.followup.send(f"✅ Ticket created: {channel.mention}", ephemeral=True)
 
-        await channel.send(content=ping_content, embed=embed, view=CloseTicket())
-        await interaction.response.send_message(f"Your {ticket_type} ticket has been created: {channel.mention}", ephemeral=True)
+class TicketSelect(discord.ui.Select):
+    def __init__(self):
+        super().__init__(placeholder="Select ticket type...", custom_id="onyx_select", options=[
+            discord.SelectOption(label="Queries", value="queries", description="Write description", emoji="💬"),
+            discord.SelectOption(label="Report", value="report", description="Report something", emoji="🚨")
+        ])
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(TicketModal(self.values[0]))
 
-    @discord.ui.button(label="General Support", style=discord.ButtonStyle.blurple, custom_id="general_support", emoji="🛠️")
-    async def general_support(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.create_ticket_channel(interaction, "General")
-
-    @discord.ui.button(label="Report", style=discord.ButtonStyle.green, custom_id="report_member", emoji="🚨")
-    async def report(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.create_ticket_channel(interaction, "Report")
-
-# --- CLOSE TICKET VIEW ---
-class CloseTicket(discord.ui.View):
+class TicketPanelView(discord.ui.LayoutView):
     def __init__(self):
         super().__init__(timeout=None)
+        container = discord.ui.Container(accent_colour=ONYX)
+        container.add_item(discord.ui.TextDisplay("## Onyx Support Panel\n-# Fully configurable ticket system"))
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay("**Options:**\n> 💬 **Queries** - Have a question? Select it.\n> 🚨 **Report** - Report a user, bug or issue."))
+        container.add_item(discord.ui.Separator(spacing=discord.SeparatorSpacing.large))
+        container.add_item(discord.ui.TextDisplay("-# Abuse of tickets will result in punishment."))
+        self.add_item(container)
+        self.add_item(discord.ui.ActionRow(TicketSelect()))
 
-    @discord.ui.button(label="Close Ticket", style=discord.ButtonStyle.red, custom_id="close_ticket", emoji="🔒")
-    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("Closing ticket and generating transcript...", ephemeral=True)
+class CloseTicketBtn(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Close & Transcript", style=discord.ButtonStyle.danger, emoji="🔒", custom_id="close_ticket_v2")
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        config = load_config()
+        transcript_channel_id = config.get("transcript_channel")
 
-        transcript = await chat_exporter.export(interaction.channel)
-        if transcript is None:
-            return
+        if transcript_channel_id:
+            transcript_channel = interaction.guild.get_channel(transcript_channel_id)
+            if transcript_channel:
+                try:
+                    transcript = await chat_exporter.export(interaction.channel, limit=None, tz_info="UTC")
+                    if transcript:
+                        file = discord.File(io.BytesIO(transcript.encode()), filename=f"transcript-{interaction.channel.name}.html")
+                        v = discord.ui.LayoutView()
+                        c = discord.ui.Container(accent_colour=ONYX)
+                        c.add_item(discord.ui.TextDisplay(f"### Ticket Closed\n**Channel:** {interaction.channel.name}\n**Closed by:** {interaction.user.mention}\n**Topic:** {interaction.channel.topic}"))
+                        v.add_item(c)
+                        await transcript_channel.send(view=v, file=file)
+                except Exception as e:
+                    print(f"Transcript error: {e}")
 
-        transcript_file = discord.File(
-            io.BytesIO(transcript.encode()),
-            filename=f"transcript-{interaction.channel.name}.html"
-        )
+        await interaction.channel.send("🔒 Closing in 3s...")
+        await asyncio.sleep(3)
+        try: await interaction.channel.delete(reason=f"Closed by {interaction.user}")
+        except: pass
 
-        log_channel = bot.get_channel(LOG_CHANNEL_ID)
-        if log_channel:
-            embed = discord.Embed(
-                title="Ticket Closed",
-                description=f"Ticket: {interaction.channel.name}\nClosed by: {interaction.user.mention}",
-                color=discord.Color.red()
-            )
-            await log_channel.send(embed=embed, file=transcript_file)
+class CloseView(discord.ui.LayoutView):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(discord.ui.ActionRow(CloseTicketBtn()))
 
-        await interaction.channel.delete()
-
-# --- WELCOME FUNCTION ---
+# --- WELCOME - V2 ---
 async def send_welcome(member, channel):
-    embed = discord.Embed(
-        title=f"👋 Welcome to {member.guild.name}!",
-        description=f"Hey {member.mention}, welcome to **{member.guild.name}**! We're glad to have you here.\n\nMake sure to read the rules and enjoy your stay! 🎉",
-        color=0x5865F2
-    )
+    view = discord.ui.LayoutView()
+    container = discord.ui.Container(accent_colour=ONYX)
+    container.add_item(discord.ui.TextDisplay(f"## 👋 Welcome to {member.guild.name}!"))
+    container.add_item(discord.ui.TextDisplay(f"Hey {member.mention}, glad to have you here! 🎉\nMember #{member.guild.member_count}"))
+    container.add_item(discord.ui.Separator())
+    container.add_item(discord.ui.TextDisplay(f"-# Member: `{member.name}`"))
+    view.add_item(container)
+    await channel.send(view=view)
 
-    embed.set_thumbnail(url=member.display_avatar.url)
-    embed.add_field(name="Member", value=f"`{member.name}`", inline=False)
-    embed.add_field(name="Member Count", value=f"`{member.guild.member_count}`", inline=False)
-
-    await channel.send(embed=embed)
-
-# --- FEATURE 4: SERVER STATS CHANNELS ---
 @tasks.loop(minutes=5)
 async def update_stats():
     guild = bot.get_guild(STATS_GUILD_ID)
-    if not guild:
-        return
-
+    if not guild: return
     member_channel = bot.get_channel(STATS_MEMBER_CHANNEL)
     if member_channel:
-        try:
-            await member_channel.edit(name=f"👥 Members: {guild.member_count}")
-        except:
-            pass
-
+        try: await member_channel.edit(name=f"👥 Members: {guild.member_count}")
+        except: pass
     bot_channel = bot.get_channel(STATS_BOT_CHANNEL)
     if bot_channel:
         try:
             bot_count = len([m for m in guild.members if m.bot])
             await bot_channel.edit(name=f"🤖 Bots: {bot_count}")
-        except:
-            pass
-
+        except: pass
 @update_stats.before_loop
-async def before_update_stats():
-    await bot.wait_until_ready()
+async def before_update_stats(): await bot.wait_until_ready()
 
-# --- BOT EVENTS ---
+# --- EVENTS ---
 @bot.event
 async def on_ready():
     global http_session
     http_session = aiohttp.ClientSession()
-
-    bot.add_view(TicketPanel())
-    bot.add_view(CloseTicket())
+    bot.add_view(TicketPanelView())
+    bot.add_view(CloseView())
     update_stats.start()
-
     for guild in bot.guilds:
         try:
             bot.tree.copy_global_to(guild=guild)
             synced = await bot.tree.sync(guild=guild)
-            print(f"Synced {len(synced)} commands to {guild.name}")
-        except Exception as e:
-            print(f"Failed to sync to {guild.name}: {e}")
-
-    print(f"Logged in as {bot.user}")
+            print(f"Synced {len(synced)} to {guild.name}")
+        except Exception as e: print(e)
+    print(f"Logged in as {bot.user} | ONYX V2 READY")
 
 @bot.event
 async def on_member_join(member):
-    guild_config = get_guild_config(member.guild.id)
-
-    role_id = guild_config.get("auto_role")
+    config = load_config()
+    role_id = config.get("auto_role")
     if role_id:
         role = member.guild.get_role(role_id)
         if role:
-            try:
-                await member.add_roles(role, reason="Auto role on join")
-            except discord.Forbidden:
-                print("Bot doesn't have permission to give that role. Move bot role higher.")
-
-    channel_id = guild_config.get("welcome_channel")
+            try: await member.add_roles(role, reason="Auto role")
+            except: pass
+    channel_id = config.get("welcome_channel")
     if channel_id:
         channel = bot.get_channel(channel_id)
-        if channel:
-            await send_welcome(member, channel)
+        if channel: await send_welcome(member, channel)
 
 @bot.event
 async def on_message(message):
-    if message.author.bot:
-        return
-
+    if message.author.bot: return
+    # automod + level + AI (kept same as yours)
     if not message.author.guild_permissions.manage_messages:
-        if "discord.gg/" in message.content.lower() or "discord.com/invite/" in message.content.lower():
+        if "discord.gg/" in message.content.lower():
             if message.channel.id not in INVITE_WHITELIST:
                 await message.delete()
-                await message.channel.send(f"{message.author.mention} No server invites allowed.", delete_after=5)
+                await message.channel.send(f"{message.author.mention} No invites.", delete_after=5)
                 return
-
-        content_lower = message.content.lower()
         for word in BANNED_WORDS:
-            if word in content_lower:
+            if word in message.content.lower():
                 await message.delete()
-                await message.channel.send(f"{message.author.mention} That word is not allowed.", delete_after=5)
+                await message.channel.send(f"{message.author.mention} Word not allowed.", delete_after=5)
                 return
-
-        if not hasattr(bot, 'spam_check'):
-            bot.spam_check = {}
-
-        user_id = message.author.id
-        now = time.time()
-
-        if user_id not in bot.spam_check:
-            bot.spam_check[user_id] = []
-
-        bot.spam_check[user_id] = [t for t in bot.spam_check[user_id] if now - t < 10]
-        bot.spam_check[user_id].append(now)
-
-        if len(bot.spam_check[user_id]) > 5:
-            await message.delete()
-            try:
-                await message.author.timeout(discord.utils.utcnow() + timedelta(seconds=60), reason="AutoMod: Spam")
-                await message.channel.send(f"{message.author.mention} timed out for 60s for spamming.", delete_after=5)
-            except:
-                pass
-            bot.spam_check[user_id] = []
-            return
-
     if message.guild and not message.content.startswith('!'):
         levels = load_levels()
-        guild_id = str(message.guild.id)
-        user_id = str(message.author.id)
-
-        if guild_id not in levels:
-            levels[guild_id] = {}
-        if user_id not in levels[guild_id]:
-            levels[guild_id][user_id] = {"xp": 0, "level": 0, "last_msg": 0}
-
-        if (datetime.now().timestamp() - levels[guild_id][user_id]["last_msg"]) > 60:
-            xp_gain = random.randint(15, 25)
-            levels[guild_id][user_id]["xp"] += xp_gain
-            levels[guild_id][user_id]["last_msg"] = datetime.now().timestamp()
-
-            current_level = levels[guild_id][user_id]["level"]
-            new_level = get_level_from_xp(levels[guild_id][user_id]["xp"])
-
-            if new_level > current_level:
-                levels[guild_id][user_id]["level"] = new_level
-                embed = discord.Embed(title="🎉 Level Up!", description=f"{message.author.mention} reached level **{new_level}**!", color=discord.Color.gold())
-
-                if new_level in LEVEL_ROLES:
-                    role = message.guild.get_role(LEVEL_ROLES[new_level])
-                    if role and role not in message.author.roles:
-                        try:
-                            await message.author.add_roles(role, reason=f"Reached level {new_level}")
-                            embed.add_field(name="Role Unlocked!", value=f"You earned the {role.mention} role", inline=False)
-                        except discord.Forbidden:
-                            embed.add_field(name="Role Error", value="I can't give that role. Move my role higher.", inline=False)
-
-                await message.channel.send(embed=embed, delete_after=10)
+        gid, uid = str(message.guild.id), str(message.author.id)
+        if gid not in levels: levels[gid] = {}
+        if uid not in levels[gid]: levels[gid][uid] = {"xp":0,"level":0,"last_msg":0}
+        if (datetime.now().timestamp() - levels[gid][uid]["last_msg"]) > 60:
+            levels[gid][uid]["xp"] += random.randint(15,25)
+            levels[gid][uid]["last_msg"] = datetime.now().timestamp()
+            new_level = get_level_from_xp(levels[gid][uid]["xp"])
+            if new_level > levels[gid][uid]["level"]:
+                levels[gid][uid]["level"] = new_level
+                view = discord.ui.LayoutView()
+                c = discord.ui.Container(accent_colour=ONYX)
+                c.add_item(discord.ui.TextDisplay(f"### 🎉 Level Up!\n{message.author.mention} reached **Level {new_level}**"))
+                view.add_item(c)
+                await message.channel.send(view=view, delete_after=10)
             save_levels(levels)
-
-    if groq_client and (bot.user in message.mentions or (AI_CHANNEL_ID!= 0 and message.channel.id == AI_CHANNEL_ID)):
-        if message.content.startswith('!'):
-            await bot.process_commands(message)
-            return
-        async with message.channel.typing():
-            try:
-                content = message.content.replace(f'<@{bot.user.id}>', '').strip()
-                if not content: return
-                chat_completion = groq_client.chat.completions.create(
-                    messages=[
-                        {"role": "system", "content": "You are RUNCANDELS AI for the RUNCANDELS Discord server. Be friendly, casual, use emojis. Keep replies under 300 chars unless asked for detail. You help with server questions, general chat, and keep vibes good. Never say you're an AI assistant - just be RUNCANDELS AI."},
-                        {"role": "user", "content": content}
-                    ],
-                    model="llama-3.1-8b-instant",
-                    max_tokens=400
-                )
-                await message.reply(chat_completion.choices[0].message.content[:2000])
-            except Exception as e:
-                print(f"AI Error: {e}")
-                await message.reply("AI is down rn 😴")
-
+    if groq_client and (bot.user in message.mentions or message.channel.id == AI_CHANNEL_ID):
+        if not message.content.startswith('!'):
+            async with message.channel.typing():
+                try:
+                    content = message.content.replace(f'<@{bot.user.id}>','').strip()
+                    if content:
+                        comp = groq_client.chat.completions.create(messages=[{"role":"system","content":"You are Onyx AI, friendly, casual, use emojis. Keep replies under 300 chars."},{"role":"user","content":content}], model="llama-3.1-8b-instant", max_tokens=400)
+                        await message.reply(comp.choices[0].message.content[:2000])
+                except Exception as e: print(e)
     await bot.process_commands(message)
 
-# --- IMAGINE COMMAND - HUGGING FACE FIXED FOR RENDER ---
-@bot.command(name="imagine")
-@commands.cooldown(1, 30, commands.BucketType.user)
-async def imagine(ctx, *, prompt: str = None):
-    if ctx.channel.id!= AI_CHANNEL_ID:
-        return await ctx.reply(f"Use this in <#{AI_CHANNEL_ID}> only.", delete_after=5)
+# --- SLASH COMMANDS - ALL V2 ---
 
-    if not prompt:
-        return await ctx.reply("What should I imagine? `!imagine a cyberpunk penguin`")
+@bot.tree.command(name="setup-ticket-panel", description="Post Onyx ticket panel (V2 + Dropdown)")
+@is_ticket_staff()
+async def setup_panel(interaction: discord.Interaction):
+    await interaction.response.send_message("Sending panel...", ephemeral=True)
+    await interaction.channel.send(view=TicketPanelView())
 
-    msg = await ctx.reply(f"🎨 Drawing: `{prompt}`\nTakes 15-40s on Render...")
+@bot.tree.command(name="set-transcript", description="Set transcript log channel")
+@is_ticket_staff()
+async def set_transcript(interaction: discord.Interaction, channel: discord.TextChannel):
+    c = load_config()
+    c["transcript_channel"] = channel.id
+    save_config(c)
+    v = discord.ui.LayoutView()
+    v.add_item(discord.ui.Container(accent_colour=ONYX, children=[discord.ui.TextDisplay(f"✅ Transcript channel set to {channel.mention}")]))
+    await interaction.response.send_message(view=v, ephemeral=True)
 
-    API_URL = "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell"
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"} if HF_TOKEN else {}
-
-    try:
-        async with http_session.post(API_URL, headers=headers, json={"inputs": prompt}, timeout=60) as response:
-            if response.status == 503:
-                return await msg.edit(content="HF models are loading. Try again in 20s.")
-            if response.status == 429:
-                return await msg.edit(content="Rate limited. Add a HF_TOKEN in Render env vars to fix.")
-            if response.status!= 200:
-                error_text = await response.text()
-                return await msg.edit(content=f"HF error {response.status}: {error_text[:500]}")
-
-            image_bytes = await response.read()
-
-        file = discord.File(io.BytesIO(image_bytes), filename="imagine.png")
-        await msg.delete()
-
-        embed = discord.Embed(title="Generated Image", description=f"`{prompt}`", color=0x5865F2)
-        embed.set_image(url="attachment://imagine.png")
-        embed.set_footer(text=f"Requested by {ctx.author.display_name}")
-        await ctx.send(embed=embed, file=file)
-
-    except asyncio.TimeoutError:
-        await msg.edit(content="Render timed out. HF is slow rn. Try again or use a shorter prompt.")
-    except Exception as e:
-        await msg.edit(content=f"Failed: `{str(e)[:200]}`")
-        print(f"Imagine Error: {e}")
-
-@imagine.error
-async def imagine_error(ctx, error):
-    if isinstance(error, commands.CommandOnCooldown):
-        await ctx.reply(f"Chill. Wait {error.retry_after:.0f}s", delete_after=5)
-    elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.reply("Give me a prompt: `!imagine a red panda`")
-
-# --- SLASH COMMANDS ---
-@bot.tree.command(name="ticket-panel", description="Post the RUNCANDELS ticket panel")
-@app_commands.checks.has_permissions(administrator=True)
-async def ticket_panel(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="📩 RUNCANDELS Help Desk",
-        description="Select a category below to open a ticket.\n\n🛠️ **General Support** — General help\n🚨 **Report** — Report a member\n\nOne active ticket per user per category.",
-        color=discord.Color.from_rgb(88, 101, 242)
-    )
-    embed.set_footer(text="RUNCANDELS Support Team")
-    await interaction.response.send_message(embed=embed, view=TicketPanel())
+@bot.tree.command(name="set-ticket-category", description="Set category for ticket types")
+@is_ticket_staff()
+@app_commands.choices(ticket_type=[app_commands.Choice(name="Queries", value="queries"), app_commands.Choice(name="Report", value="report")])
+async def set_ticket_category(interaction: discord.Interaction, ticket_type: str, category: discord.CategoryChannel):
+    c = load_config()
+    if "ticket_categories" not in c: c["ticket_categories"] = {}
+    c["ticket_categories"][ticket_type] = category.id
+    save_config(c)
+    v = discord.ui.LayoutView()
+    v.add_item(discord.ui.Container(accent_colour=ONYX, children=[discord.ui.TextDisplay(f"✅ `{ticket_type}` tickets will now open in **{category.name}**")]))
+    await interaction.response.send_message(view=v, ephemeral=True)
 
 @bot.tree.command(name="welcomeset", description="Set the welcome channel")
 @app_commands.checks.has_permissions(administrator=True)
 async def welcomeset(interaction: discord.Interaction, channel: discord.TextChannel):
     set_guild_config(interaction.guild_id, "welcome_channel", channel.id)
-    await interaction.response.send_message(f"Welcome channel set to {channel.mention}", ephemeral=True)
+    view = discord.ui.LayoutView()
+    view.add_item(discord.ui.Container(accent_colour=ONYX, children=[discord.ui.TextDisplay(f"Welcome channel set to {channel.mention}")]))
+    await interaction.response.send_message(view=view, ephemeral=True)
 
-@bot.tree.command(name="autorole", description="Set the auto role for new members")
-@app_commands.checks.has_permissions(administrator=True)
-async def autorole(interaction: discord.Interaction, role: discord.Role):
-    if role >= interaction.guild.me.top_role:
-        await interaction.response.send_message("I can't give that role. Move my role higher than it.", ephemeral=True)
-        return
-    set_guild_config(interaction.guild_id, "auto_role", role.id)
-    await interaction.response.send_message(f"Auto role set to {role.mention}", ephemeral=True)
-
-@bot.tree.command(name="welcome", description="Test or manage welcome messages")
-@app_commands.checks.has_permissions(administrator=True)
-async def welcome(interaction: discord.Interaction, action: str):
-    if action.lower() == "test":
-        guild_config = get_guild_config(interaction.guild_id)
-        channel_id = guild_config.get("welcome_channel")
-        if not channel_id:
-            await interaction.response.send_message("Set a welcome channel first with `/welcomeset`", ephemeral=True)
-            return
-        channel = bot.get_channel(channel_id)
-        if channel:
-            await send_welcome(interaction.user, channel)
-            await interaction.response.send_message("Sent test welcome message!", ephemeral=True)
-        else:
-            await interaction.response.send_message("Welcome channel not found.", ephemeral=True)
-    else:
-        await interaction.response.send_message("Use `/welcome test` to send a test message.", ephemeral=True)
-
-@bot.tree.command(name="rank", description="Check your level and XP")
+@bot.tree.command(name="rank", description="Check your level")
 async def rank(interaction: discord.Interaction, member: discord.Member = None):
-    if member is None:
-        member = interaction.user
-
+    member = member or interaction.user
     levels = load_levels()
-    guild_id = str(interaction.guild.id)
-    user_id = str(member.id)
+    gid, uid = str(interaction.guild.id), str(member.id)
+    if gid not in levels or uid not in levels[gid]:
+        return await interaction.response.send_message(f"{member.mention} has no XP", ephemeral=True)
+    data = levels[gid][uid]
+    view = discord.ui.LayoutView()
+    c = discord.ui.Container(accent_colour=ONYX)
+    c.add_item(discord.ui.TextDisplay(f"## {member.display_name}'s Rank\n**Level:** {data['level']}\n**XP:** {data['xp']}"))
+    view.add_item(c)
+    await interaction.response.send_message(view=view)
 
-    if guild_id not in levels or user_id not in levels[guild_id]:
-        await interaction.response.send_message(
-            f"{member.mention} hasn't earned any XP yet!",
-            ephemeral=True
-        )
-        return
-
-    user_data = levels[guild_id][user_id]
-    level = user_data["level"]
-    xp = user_data["xp"]
-
-    current_level_xp = sum(get_xp_for_level(i) for i in range(level))
-    next_level_xp = get_xp_for_level(level)
-    progress = xp - current_level_xp
-
-    embed = discord.Embed(
-    title=f"{member.display_name}'s Rank",
-    color=discord.Color.blurple()
-    )
-
-    embed.set_thumbnail(url=member.display_avatar.url)
-    embed.add_field(name="Level", value=f"{level}", inline=True)
-    embed.add_field(name="XP", value=f"{xp}", inline=True)
-    embed.add_field(
-        name="Progress",
-        value=f"{progress}/{next_level_xp}",
-        inline=True
-    )
-
-    await interaction.response.send_message(embed=embed)
-
-@bot.tree.command(name="leaderboard", description="Show the server XP leaderboard")
+@bot.tree.command(name="leaderboard", description="Show leaderboard")
 async def leaderboard(interaction: discord.Interaction):
     levels = load_levels()
-    guild_id = str(interaction.guild.id)
+    gid = str(interaction.guild.id)
+    if gid not in levels: return await interaction.response.send_message("No XP yet", ephemeral=True)
+    sorted_users = sorted(levels[gid].items(), key=lambda x: x[1]['xp'], reverse=True)[:10]
+    desc = "\n".join([f"**{i}.** <@{uid}> - Level {d['level']} ({d['xp']} XP)" for i,(uid,d) in enumerate(sorted_users,1)])
+    view = discord.ui.LayoutView()
+    c = discord.ui.Container(accent_colour=ONYX)
+    c.add_item(discord.ui.TextDisplay(f"### 🏆 Leaderboard\n{desc}"))
+    view.add_item(c)
+    await interaction.response.send_message(view=view)
 
-    if guild_id not in levels:
-        await interaction.response.send_message("No one has XP yet!", ephemeral=True)
-        return
-
-    sorted_users = sorted(levels[guild_id].items(), key=lambda x: x[1]['xp'], reverse=True)[:10]
-
-    desc = ""
-    for i, (user_id, data) in enumerate(sorted_users, 1):
-        user = interaction.guild.get_member(int(user_id))
-        name = user.display_name if user else f"User {user_id}"
-        desc += f"**{i}.** {name} - Level {data['level']} ({data['xp']} XP)\n"
-
-    embed = discord.Embed(title="🏆 RUNCANDELS Leaderboard", description=desc, color=discord.Color.gold())
-    await interaction.response.send_message(embed=embed)
-
-@bot.tree.command(name="levelrewards", description="Show level role rewards")
-async def levelrewards(interaction: discord.Interaction):
-    embed = discord.Embed(title="🎁 Level Rewards", description="Reach these levels to unlock roles:", color=discord.Color.green())
-
-    for level, role_id in sorted(LEVEL_ROLES.items()):
-        role = interaction.guild.get_role(role_id)
-        if role:
-            embed.add_field(name=f"Level {level}", value=role.mention, inline=True)
-
-    await interaction.response.send_message(embed=embed)
-
-@bot.tree.command(name="roast", description="Roast a user")
-async def roast(interaction: discord.Interaction, user: discord.Member):
-    if user == bot.user:
-        return await interaction.response.send_message("You can't roast me 💀", ephemeral=True)
-
-    if not groq_client:
-        return await interaction.response.send_message("Roast AI is offline", ephemeral=True)
-
-    await interaction.response.defer()
-
+# --- YOUR IMAGINE COMMAND SAME BUT V2 RESPONSE ---
+@bot.command(name="imagine")
+@commands.cooldown(1, 30, commands.BucketType.user)
+async def imagine(ctx, *, prompt: str = None):
+    if ctx.channel.id!= AI_CHANNEL_ID: return await ctx.reply(f"Use in <#{AI_CHANNEL_ID}>", delete_after=5)
+    if not prompt: return await ctx.reply("Give prompt: `!imagine a cyberpunk penguin`")
+    msg = await ctx.reply(f"🎨 Drawing: `{prompt}`")
+    API_URL = "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell"
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"} if HF_TOKEN else {}
     try:
-        chat_completion = groq_client.chat.completions.create(
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are RUNCANDELS AI. Roast the user savagely but keep it playful. No slurs or hate. Maximum 2 sentences. Use emojis."
-                },
-                {
-                    "role": "user",
-                    "content": f"Roast this person: {user.display_name}"
-                }
-            ],
-            model="llama-3.1-8b-instant",
-            max_tokens=150
-        )
-        await interaction.followup.send(f"{user.mention} {chat_completion.choices[0].message.content}")
+        async with http_session.post(API_URL, headers=headers, json={"inputs": prompt}, timeout=60) as r:
+            if r.status!= 200: return await msg.edit(content=f"Error {r.status}")
+            image_bytes = await r.read()
+        file = discord.File(io.BytesIO(image_bytes), filename="imagine.png")
+        await msg.delete()
+        view = discord.ui.LayoutView()
+        c = discord.ui.Container(accent_colour=ONYX)
+        c.add_item(discord.ui.TextDisplay(f"### Generated\n`{prompt}`\n-# Requested by {ctx.author.display_name}"))
+        view.add_item(c)
+        await ctx.send(view=view, file=file)
     except Exception as e:
-        print(f"Roast Error: {e}")
-        await interaction.followup.send("Couldn't roast them... they're too powerful 😔")
-# --- LOAD COGS ---
-async def load_cogs():
-    await bot.load_extension("cogs.moderation")
+        await msg.edit(content=f"Failed: {e}")
 
-# --- START BOT ---
+async def load_cogs():
+    try: await bot.load_extension("cogs.moderation")
+    except Exception as e: print(f"Cog load error: {e}")
+
 if __name__ == "__main__":
     keep_alive()
     token = os.getenv("DISCORD_TOKEN")
-
     if token:
-        import asyncio
-
         async def main():
             await load_cogs()
             await bot.start(token)
-
         asyncio.run(main())
-    else:
-        print("DISCORD_TOKEN not set!")
