@@ -1,5 +1,5 @@
-discord.py>=2.4.0
-discord-chat-exporter==0.0.12
+discord.py
+chat-exporter
 aiohttp
 Flask
 groq
