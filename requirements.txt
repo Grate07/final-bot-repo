@@ -1,6 +1,0 @@
-discord.py
-chat-exporter
-aiohttp
-Flask
-groq
-requests
