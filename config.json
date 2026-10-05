@@ -1,0 +1,13 @@
+{
+  "prefix": "!",
+  "accentColor": 9808686,
+  "allowedRoleId": "PUT_STAFF_ROLE_ID_HERE",
+  "logChannelId": "PUT_MOD_LOG_CHANNEL_ID_HERE",
+  "ticketCategoryId": "PUT_CATEGORY_ID_FOR_TICKETS_HERE",
+  "ticketSupportRoleId": "PUT_SUPPORT_TEAM_ROLE_ID_HERE",
+  "ticketOptions": [
+    { "label": "General Support", "value": "general", "description": "Get help with general server questions and assistance", "emoji": "💬" },
+    { "label": "Query System", "value": "query", "description": "Have a question? Our staff will answer your queries", "emoji": "❓" },
+    { "label": "Report Issue", "value": "report", "description": "Report a member, bug, or any server issue", "emoji": "🚨" }
+  ]
+}
