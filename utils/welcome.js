@@ -29,13 +29,10 @@ function getOrdinal(number) {
   switch (number % 10) {
     case 1:
       return `${number}st`;
-
     case 2:
       return `${number}nd`;
-
     case 3:
       return `${number}rd`;
-
     default:
       return `${number}th`;
   }
@@ -50,79 +47,61 @@ async function sendWelcome(member) {
     return false;
   }
 
-  /*
-   * Give the member their permanent explorer number.
-   *
-   * 1st person  -> 1st explorer
-   * 2nd person  -> 2nd explorer
-   * 3rd person  -> 3rd explorer
-   * 4th person  -> 4th explorer
-   */
+  // Give the new member their permanent explorer number
   config.explorerCount = Number(config.explorerCount || 0) + 1;
 
   const explorerNumber = config.explorerCount;
+  const ordinal = getOrdinal(explorerNumber);
 
   saveConfig();
 
-  const ordinal = getOrdinal(explorerNumber);
-
-  const serverIcon = member.guild.iconURL({
+  // Get THE MEMBER'S avatar, not the server icon
+  const memberAvatar = member.displayAvatarURL({
     extension: 'png',
-    size: 512
+    size: 512,
+    forceStatic: false
   });
 
-  const components = [];
+  const container = new ContainerBuilder()
+    .setAccentColor(Number(config.accentColor || 0x0F0F0F))
 
-  // Header
-  components.push(
-    new TextDisplayBuilder().setContent(
-      `# 👋 Welcome to\n# RUNCANDELS`
+    // Header
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        `# 👋 Welcome to\n# RUNCANDELS`
+      )
     )
-  );
 
-  // Server icon
-  if (serverIcon) {
-    components.push(
+    // New member's avatar
+    .addMediaGalleryComponents(
       new MediaGalleryBuilder({
         items: [
           {
-            description: 'RUNCANDELS',
+            description: `${member.user.username}'s avatar`,
             media: {
-              url: serverIcon
+              url: memberAvatar
             }
           }
         ]
       })
+    )
+
+    // Welcome text
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        `## Welcome to our community,\n${member}!\n\n` +
+        `We are absolutely thrilled to have you here. 🌊\n\n` +
+        `📚 Make sure to read through <#1493587392513183875> before you get started!\n\n` +
+        `You are our **${ordinal} explorer!**`
+      )
+    )
+
+    // Footer
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        `\n*RUNCANDELS • Community*`
+      )
     );
-  }
-
-  // Welcome message
-  components.push(
-    new TextDisplayBuilder().setContent(
-      `## Welcome to our community,\n${member}!\n\n` +
-      `We are absolutely thrilled to have you here. 🌊\n\n` +
-      `📚 Make sure to read through <#1493587392513183875> before you get started!\n\n` +
-      `You are our **${ordinal} explorer!**`
-    )
-  );
-
-  // Footer
-  components.push(
-    new TextDisplayBuilder().setContent(
-      `\n*RUNCANDELS • Community*`
-    )
-  );
-
-  const container = new ContainerBuilder()
-    .setAccentColor(Number(config.accentColor || 0x0F0F0F));
-
-  for (const component of components) {
-    if (component instanceof TextDisplayBuilder) {
-      container.addTextDisplayComponents(component);
-    } else {
-      container.addMediaGalleryComponents(component);
-    }
-  }
 
   await channel.send({
     flags: MessageFlags.IsComponentsV2,
