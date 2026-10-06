@@ -1,0 +1,16 @@
+{
+  "name": "runcandels-discord-bot",
+  "version": "2.0.0",
+  "description": "Runcandels — Components V2 moderation, tickets, transcripts and welcome bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18.17.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.26.5",
+    "express": "^5.1.0"
+  }
+}

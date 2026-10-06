@@ -1,0 +1,31 @@
+{
+  "prefix": "!",
+  "accentColor": 986895,
+  "allowedRoleId": "PUT_ALLOWED_ROLE_ID_HERE",
+  "logChannelId": "PUT_LOG_CHANNEL_ID_HERE",
+  "ticketCategoryId": "PUT_TICKET_CATEGORY_ID_HERE",
+  "ticketSupportRoleId": "PUT_TICKET_SUPPORT_ROLE_ID_HERE",
+  "welcomeChannelId": "PUT_WELCOME_CHANNEL_ID_HERE",
+  "transcriptChannelId": "PUT_TRANSCRIPT_CHANNEL_ID_HERE",
+  "ticketCounter": 5,
+  "ticketOptions": [
+    {
+      "label": "General Support",
+      "value": "general-support",
+      "description": "Get help with a general issue.",
+      "emoji": "🎟️"
+    },
+    {
+      "label": "Query System",
+      "value": "query-system",
+      "description": "Ask a question about the server or its systems.",
+      "emoji": "❓"
+    },
+    {
+      "label": "Report Issue",
+      "value": "report-issue",
+      "description": "Report a problem that needs staff attention.",
+      "emoji": "🚨"
+    }
+  ]
+}
